@@ -15,6 +15,9 @@ class ImportHistory extends Model
     public const STATUS_COMMITTED = 'COMMITTED';
     public const STATUS_FAILED = 'FAILED';
 
+    /** Jumlah balita lama yang profilnya diperbarui saat commit (tidak disimpan). */
+    public int $toddlersUpdated = 0;
+
     protected $fillable = [
         'user_id',
         'original_name',

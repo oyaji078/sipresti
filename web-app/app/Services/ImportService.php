@@ -42,6 +42,9 @@ class ImportService
         'posyandu' => ['label' => 'Posyandu', 'required' => false],
     ];
 
+    /** Kolom yang dapat menyebabkan baris tidak valid, sehingga dapat diperbaiki lewat web. */
+    public const CORRECTABLE_FIELDS = ['name', 'nik', 'birth_date', 'gender', 'measurement_date', 'weight_kg', 'height_cm'];
+
     /** Nama kolom umum (ekspor E-PPBGM & template) untuk pemetaan otomatis. */
     private const HEADER_ALIASES = [
         'name' => ['nama', 'nama balita', 'nama anak'],
@@ -258,7 +261,10 @@ class ImportService
      *
      * @return array{valid:array<int,array>, errors:array<int,array>, duplicates:int, summary:array<string,int>}
      */
-    public function validateRows(string $path, string $extension, array $mapping): array
+    /**
+     * @param  array<int, array<string, string>>  $corrections  nomor baris => [field => nilai perbaikan dari web]
+     */
+    public function validateRows(string $path, string $extension, array $mapping, array $corrections = []): array
     {
         $rows = $this->readRows(Storage::disk('local')->path($path), $extension);
         array_shift($rows);
@@ -280,50 +286,52 @@ class ImportService
                 $record[$field] = $row[(int) $columnIndex] ?? '';
             }
 
+            $record = array_replace($record, $corrections[$lineNumber] ?? []);
+
             $problems = [];
 
             $name = trim((string) ($record['name'] ?? ''));
             if ($name === '') {
-                $problems[] = 'Nama balita kosong';
+                $problems['name'] = 'Nama balita kosong';
             }
 
             $birthDate = $this->parseDate($record['birth_date'] ?? '');
             if (! $birthDate) {
-                $problems[] = 'Tanggal lahir tidak dapat dibaca';
+                $problems['birth_date'] = 'Tanggal lahir tidak dapat dibaca';
             }
 
             $measurementDate = $this->parseDate($record['measurement_date'] ?? '');
             if (! $measurementDate) {
-                $problems[] = 'Tanggal pengukuran tidak dapat dibaca';
+                $problems['measurement_date'] = 'Tanggal pengukuran tidak dapat dibaca';
             }
 
             $gender = $this->parseGender($record['gender'] ?? '');
             if (! $gender) {
-                $problems[] = 'Jenis kelamin tidak dikenali';
+                $problems['gender'] = 'Jenis kelamin tidak dikenali';
             }
 
             $weight = $this->parseNumber($record['weight_kg'] ?? '');
             if ($weight === null) {
-                $problems[] = 'Berat badan tidak dapat dibaca';
+                $problems['weight_kg'] = 'Berat badan tidak dapat dibaca';
             } elseif ($weight < $cfg['weight_kg_min'] || $weight > $cfg['weight_kg_max']) {
-                $problems[] = 'Berat badan di luar batas wajar';
+                $problems['weight_kg'] = 'Berat badan di luar batas wajar';
             }
 
             $height = $this->parseNumber($record['height_cm'] ?? '');
             if ($height === null) {
-                $problems[] = 'Tinggi badan tidak dapat dibaca';
+                $problems['height_cm'] = 'Tinggi badan tidak dapat dibaca';
             } elseif ($height < $cfg['height_cm_min'] || $height > $cfg['height_cm_max']) {
-                $problems[] = 'Tinggi badan di luar batas wajar';
+                $problems['height_cm'] = 'Tinggi badan di luar batas wajar';
             }
 
             $nik = preg_replace('/\D/', '', (string) ($record['nik'] ?? '')) ?: null;
             if ($nik !== null && strlen($nik) !== 16) {
-                $problems[] = 'NIK bukan 16 digit';
+                $problems['nik'] = 'NIK bukan 16 digit';
                 $nik = null;
             }
 
             if ($birthDate && $measurementDate && $measurementDate->lt($birthDate)) {
-                $problems[] = 'Tanggal pengukuran mendahului tanggal lahir';
+                $problems['measurement_date'] = 'Tanggal pengukuran mendahului tanggal lahir';
             }
 
             if ($problems !== []) {
@@ -331,6 +339,10 @@ class ImportService
                     'line' => $lineNumber,
                     'name' => $name !== '' ? $name : '(tanpa nama)',
                     'problems' => $problems,
+                    'values' => array_map(
+                        static fn (string $field): string => (string) ($record[$field] ?? ''),
+                        array_combine(self::CORRECTABLE_FIELDS, self::CORRECTABLE_FIELDS),
+                    ),
                 ];
                 continue;
             }
@@ -402,9 +414,10 @@ class ImportService
 
             $success = 0;
             $skipped = 0;
+            $updatedToddlers = [];
 
             foreach ($validRows as $row) {
-                $toddler = $this->resolveToddler($row, $user);
+                $toddler = $this->resolveToddler($row, $user, $updatedToddlers);
 
                 $exists = Measurement::query()
                     ->where('toddler_id', $toddler->id)
@@ -443,27 +456,34 @@ class ImportService
                 AuditLog::ACTION_IMPORT,
                 'import_history',
                 $history->id,
-                'Import E-PPBGM: '.$success.' baris masuk, '.$skipped.' duplikat dilewati',
+                'Import E-PPBGM: '.$success.' baris masuk, '.$skipped.' duplikat dilewati, '
+                    .count($updatedToddlers).' data balita diperbarui',
                 $user,
             );
+
+            $history->toddlersUpdated = count($updatedToddlers);
 
             return $history;
         });
     }
 
-    private function resolveToddler(array $row, User $user): Toddler
+    /** @param  array<int, true>  $updatedToddlers  id balita yang datanya diperbarui */
+    private function resolveToddler(array $row, User $user, array &$updatedToddlers): Toddler
     {
-        $query = Toddler::query();
+        $toddler = $row['nik'] ? Toddler::query()->where('nik', $row['nik'])->first() : null;
 
-        if ($row['nik']) {
-            $query->where('nik', $row['nik']);
-        } else {
-            $query->where('name', $row['name'])->whereDate('birth_date', $row['birth_date']);
-        }
-
-        $toddler = $query->first();
+        // Balita yang dulu masuk tanpa NIK tetap dikenali saat NIK-nya muncul di ekspor berikutnya.
+        $toddler ??= Toddler::query()
+            ->where('name', $row['name'])
+            ->whereDate('birth_date', $row['birth_date'])
+            ->when($row['nik'], fn ($q) => $q->whereNull('nik'))
+            ->first();
 
         if ($toddler) {
+            if ($this->refreshToddler($toddler, $row)) {
+                $updatedToddlers[$toddler->id] = true;
+            }
+
             return $toddler;
         }
 
@@ -479,6 +499,45 @@ class ImportService
             'posyandu' => $row['posyandu'],
             'created_by' => $user->id,
         ]);
+    }
+
+    /**
+     * Perbarui profil balita dari ekspor bulan lain. Kolom kosong selalu diisi;
+     * kolom yang sudah terisi hanya ditimpa bila baris ini adalah pengukuran
+     * terbaru, agar impor berkas lama tidak menimpa data yang lebih baru.
+     * Tanggal lahir tidak diubah karena usia pemeriksaan lama dihitung darinya.
+     */
+    private function refreshToddler(Toddler $toddler, array $row): bool
+    {
+        $isNewest = ! $toddler->measurements()
+            ->whereDate('measurement_date', '>', $row['measurement_date'])
+            ->exists();
+
+        $changes = [];
+
+        if ($row['nik'] && blank($toddler->nik)) {
+            $changes['nik'] = $row['nik'];
+        }
+
+        foreach (['name', 'gender', 'mother_name', 'address', 'village', 'posyandu'] as $field) {
+            $value = $row[$field] ?? null;
+
+            if (blank($value) || $value === $toddler->{$field}) {
+                continue;
+            }
+
+            if (blank($toddler->{$field}) || $isNewest) {
+                $changes[$field] = $value;
+            }
+        }
+
+        if ($changes === []) {
+            return false;
+        }
+
+        $toddler->update($changes);
+
+        return true;
     }
 
     // --------------------------------------------------------------- parsing

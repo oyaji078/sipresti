@@ -17,6 +17,8 @@ class ImportController extends Controller
 {
     private const SESSION_KEY = 'import.staged';
 
+    private const CORRECTIONS_KEY = 'import.corrections';
+
     public function __construct(private readonly ImportService $import) {}
 
     public function index(Request $request): View
@@ -60,7 +62,7 @@ class ImportController extends Controller
             'total' => $staged['total'],
         ]);
 
-        $request->session()->forget('import.preview');
+        $request->session()->forget(['import.preview', self::CORRECTIONS_KEY]);
 
         return back()->with('toast', [
             'message' => 'Berkas terbaca: '.$staged['total'].' baris data. Lanjutkan ke pemetaan kolom.',
@@ -88,24 +90,92 @@ class ImportController extends Controller
         $mapping = array_filter($mapping, static fn ($v) => $v !== '' && $v !== null);
 
         try {
-            $result = $this->import->validateRows($staged['path'], $staged['extension'], $mapping);
+            $result = $this->storePreview($request, $staged, $mapping);
         } catch (\Throwable $e) {
             report($e);
 
             return back()->with('error', 'Validasi gagal. Periksa kembali berkas dan pemetaan kolom.');
         }
 
-        $request->session()->put('import.preview', [
-            'mapping' => $mapping,
-            'summary' => $result['summary'],
-            'errors' => array_slice($result['errors'], 0, 100),
-            'sample' => array_slice($result['valid'], 0, 10),
-        ]);
-
         return back()->with('toast', [
             'message' => 'Validasi selesai: '.$result['summary']['valid'].' baris siap diimpor.',
             'type' => $result['summary']['valid'] > 0 ? 'success' : 'warning',
         ]);
+    }
+
+    /** Perbaikan baris tidak valid langsung dari web, lalu validasi ulang. */
+    public function correct(Request $request): RedirectResponse
+    {
+        $staged = $request->session()->get(self::SESSION_KEY);
+        $preview = $request->session()->get('import.preview');
+
+        if (! $staged || ! $preview) {
+            return redirect()->route('import.index')->with('error', 'Sesi import telah berakhir. Unggah ulang berkas.');
+        }
+
+        $input = $request->validate([
+            'corrections' => ['required_without:clear_invalid_nik', 'array'],
+            'corrections.*' => ['array'],
+            'corrections.*.*' => ['nullable', 'string', 'max:255'],
+        ])['corrections'] ?? [];
+
+        $corrections = $request->session()->get(self::CORRECTIONS_KEY, []);
+
+        // NIK 15 digit dari E-PPBGM muncul lagi tiap bulan; satu klik agar baris tetap masuk tanpa NIK.
+        if ($request->boolean('clear_invalid_nik')) {
+            $current = $this->import->validateRows($staged['path'], $staged['extension'], $preview['mapping'], $corrections);
+
+            foreach ($current['errors'] as $error) {
+                if (isset($error['problems']['nik'])) {
+                    $corrections[$error['line']]['nik'] = '';
+                }
+            }
+        }
+
+        foreach ($input as $line => $fields) {
+            foreach (ImportService::CORRECTABLE_FIELDS as $field) {
+                if (array_key_exists($field, $fields)) {
+                    $corrections[(int) $line][$field] = trim((string) $fields[$field]);
+                }
+            }
+        }
+
+        $request->session()->put(self::CORRECTIONS_KEY, $corrections);
+
+        try {
+            $result = $this->storePreview($request, $staged, $preview['mapping']);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return back()->with('error', 'Validasi ulang gagal. Unggah ulang berkas.');
+        }
+
+        $remaining = $result['summary']['invalid'];
+
+        return back()->with('toast', [
+            'message' => 'Perbaikan disimpan: '.$result['summary']['valid'].' baris siap diimpor'
+                .($remaining > 0 ? ', '.$remaining.' baris masih bermasalah.' : '.'),
+            'type' => $remaining > 0 ? 'warning' : 'success',
+        ]);
+    }
+
+    private function storePreview(Request $request, array $staged, array $mapping): array
+    {
+        $result = $this->import->validateRows(
+            $staged['path'],
+            $staged['extension'],
+            $mapping,
+            $request->session()->get(self::CORRECTIONS_KEY, []),
+        );
+
+        $request->session()->put('import.preview', [
+            'mapping' => $mapping,
+            'summary' => $result['summary'],
+            'errors' => array_slice($result['errors'], 0, 200),
+            'sample' => array_slice($result['valid'], 0, 10),
+        ]);
+
+        return $result;
     }
 
     /** Langkah 6–8: Konfirmasi, tulis dalam transaction, tampilkan ringkasan. */
@@ -119,7 +189,12 @@ class ImportController extends Controller
         }
 
         try {
-            $result = $this->import->validateRows($staged['path'], $staged['extension'], $preview['mapping']);
+            $result = $this->import->validateRows(
+                $staged['path'],
+                $staged['extension'],
+                $preview['mapping'],
+                $request->session()->get(self::CORRECTIONS_KEY, []),
+            );
 
             if ($result['valid'] === []) {
                 return back()->with('error', 'Tidak ada baris valid untuk diimpor.');
@@ -147,10 +222,15 @@ class ImportController extends Controller
 
         // Berkas sementara dihapus setelah diproses.
         Storage::disk('local')->delete($staged['path']);
-        $request->session()->forget([self::SESSION_KEY, 'import.preview']);
+        $request->session()->forget([self::SESSION_KEY, 'import.preview', self::CORRECTIONS_KEY]);
+
+        $message = 'Import selesai: '.$history->success_rows.' data pemeriksaan masuk';
+        if ($history->toddlersUpdated > 0) {
+            $message .= ', '.$history->toddlersUpdated.' data balita diperbarui';
+        }
 
         return redirect()->route('import.show', $history)
-            ->with('toast', ['message' => 'Import selesai: '.$history->success_rows.' data pemeriksaan masuk.', 'type' => 'success']);
+            ->with('toast', ['message' => $message.'.', 'type' => 'success']);
     }
 
     public function show(ImportHistory $importHistory): View

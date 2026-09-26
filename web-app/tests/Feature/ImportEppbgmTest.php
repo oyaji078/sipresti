@@ -247,6 +247,133 @@ class ImportEppbgmTest extends TestCase
         $this->assertGreaterThan(0, $kedua->duplicate_rows);
     }
 
+    public function test_baris_tidak_valid_dapat_diperbaiki_lewat_web_lalu_diimpor(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+
+        $this->actingAs($petugas)->from('/import')->post('/import/upload', ['file' => $this->berkasContoh()]);
+        $this->actingAs($petugas)->from('/import')->post('/import/mapping', ['mapping' => $this->pemetaanLengkap()]);
+
+        $rusak = collect(session('import.preview')['errors'])->firstWhere('line', 5);
+        $this->assertSame(['birth_date', 'gender', 'weight_kg', 'height_cm'], array_keys($rusak['problems']));
+        $this->assertSame('bukan-tanggal', $rusak['values']['birth_date']);
+
+        $this->actingAs($petugas)->from('/import')
+            ->post('/import/perbaiki', ['corrections' => [5 => [
+                'name' => 'Baris Diperbaiki', 'nik' => '', 'birth_date' => '2024-02-01', 'gender' => 'P',
+                'measurement_date' => '01/09/2026', 'weight_kg' => '10,5', 'height_cm' => '80',
+            ]]])
+            ->assertRedirect('/import');
+
+        $summary = session('import.preview')['summary'];
+        $this->assertSame(4, $summary['valid']);
+        $this->assertSame(0, $summary['invalid']);
+        $this->assertSame(1, $summary['duplicate']);
+
+        $this->actingAs($petugas)->from('/import')->post('/import/commit');
+
+        $diperbaiki = Toddler::where('name', 'Baris Diperbaiki')->firstOrFail();
+        $this->assertSame('P', $diperbaiki->gender);
+        $this->assertSame('10.50', (string) $diperbaiki->measurements()->firstOrFail()->weight_kg);
+        $this->assertDatabaseCount('measurements', 4);
+    }
+
+    public function test_perbaikan_hanya_menerima_kolom_yang_diizinkan(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+
+        $this->actingAs($petugas)->from('/import')->post('/import/upload', ['file' => $this->berkasContoh()]);
+        $this->actingAs($petugas)->from('/import')->post('/import/mapping', ['mapping' => $this->pemetaanLengkap()]);
+        $this->actingAs($petugas)->from('/import')
+            ->post('/import/perbaiki', ['corrections' => [5 => ['created_by' => '999', 'nik' => '']]]);
+
+        $this->assertSame([5 => ['nik' => '']], session('import.corrections'));
+    }
+
+    public function test_nik_tidak_valid_dapat_dikosongkan_sekaligus(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+
+        $header = 'Nama;NIK;Tgl Lahir;JK;Tanggal Pengukuran;Berat;Tinggi';
+        $file = UploadedFile::fake()->createWithContent('nik.csv', implode("\r\n", [
+            $header,
+            'Satu;503180612220001;2024-01-15;L;2026-09-05;11;85',
+            'Dua;52030116197000;2024-02-15;P;2026-09-05;10;80',
+            'Tiga;;bukan-tanggal;P;2026-09-05;10;80',
+        ])."\r\n");
+
+        $this->actingAs($petugas)->from('/import')->post('/import/upload', ['file' => $file]);
+        $this->actingAs($petugas)->from('/import')->post('/import/mapping', ['mapping' => [
+            'name' => 0, 'nik' => 1, 'birth_date' => 2, 'gender' => 3, 'measurement_date' => 4, 'weight_kg' => 5, 'height_cm' => 6,
+        ]]);
+        $this->assertSame(3, session('import.preview')['summary']['invalid']);
+
+        $this->actingAs($petugas)->from('/import')->post('/import/perbaiki', ['clear_invalid_nik' => 1]);
+
+        $summary = session('import.preview')['summary'];
+        $this->assertSame(2, $summary['valid']);
+        $this->assertSame(1, $summary['invalid']);
+    }
+
+    /** @param  array<int, string>  $rows */
+    private function unggahDanImpor(\App\Models\User $petugas, array $rows): void
+    {
+        $header = 'Nama;NIK;Tgl Lahir;JK;Tanggal Pengukuran;Berat;Tinggi;Nama Ortu;Desa/Kel;Posyandu';
+        $file = UploadedFile::fake()->createWithContent('bulan.csv', implode("\r\n", [$header, ...$rows])."\r\n");
+
+        $this->actingAs($petugas)->from('/import')->post('/import/upload', ['file' => $file]);
+        $this->actingAs($petugas)->from('/import')->post('/import/mapping', ['mapping' => [
+            'name' => 0, 'nik' => 1, 'birth_date' => 2, 'gender' => 3, 'measurement_date' => 4,
+            'weight_kg' => 5, 'height_cm' => 6, 'mother_name' => 7, 'village' => 8, 'posyandu' => 9,
+        ]]);
+        $this->actingAs($petugas)->from('/import')->post('/import/commit');
+    }
+
+    public function test_ekspor_bulan_berikutnya_memperbarui_data_balita_lama(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+
+        $this->unggahDanImpor($petugas, ['Ananda;5203019900010001;2024-01-15;L;2026-08-05;11;85;;Lepak;']);
+        $this->unggahDanImpor($petugas, ['Ananda;5203019900010001;2024-01-15;L;2026-09-05;11,4;86;Ibu Ananda;Menceh;Melati']);
+
+        $this->assertDatabaseCount('toddlers', 1);
+        $toddler = Toddler::firstOrFail();
+        $this->assertSame('Ibu Ananda', $toddler->mother_name);
+        $this->assertSame('Menceh', $toddler->village);
+        $this->assertSame('Melati', $toddler->posyandu);
+        $this->assertSame(2, $toddler->measurements()->count());
+    }
+
+    public function test_ekspor_lama_hanya_mengisi_kolom_kosong(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+
+        $this->unggahDanImpor($petugas, ['Ananda;5203019900010001;2024-01-15;L;2026-09-05;11,4;86;;Menceh;']);
+        $this->unggahDanImpor($petugas, ['Ananda;5203019900010001;2024-01-15;L;2026-08-05;11;85;Ibu Ananda;Lepak;Melati']);
+
+        $toddler = Toddler::firstOrFail();
+        $this->assertSame('Menceh', $toddler->village);
+        $this->assertSame('Ibu Ananda', $toddler->mother_name);
+        $this->assertSame('Melati', $toddler->posyandu);
+    }
+
+    public function test_balita_tanpa_nik_dikenali_saat_nik_muncul(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+
+        $this->unggahDanImpor($petugas, ['Ananda;;2024-01-15;L;2026-08-05;11;85;;;']);
+        $this->unggahDanImpor($petugas, ['Ananda;5203019900010001;2024-01-15;L;2026-09-05;11,4;86;;;']);
+
+        $this->assertDatabaseCount('toddlers', 1);
+        $this->assertSame('5203019900010001', Toddler::firstOrFail()->nik);
+    }
+
     public function test_commit_tanpa_sesi_diarahkan_ulang(): void
     {
         $this->actingAs($this->petugas())
