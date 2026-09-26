@@ -10,6 +10,8 @@ use App\Models\Measurement;
 use App\Models\ModelVersion;
 use App\Models\Prediction;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -55,20 +57,7 @@ class PredictionService
         $modelVersion = $this->resolveModelVersion($result['model_version']);
 
         return DB::transaction(function () use ($measurement, $user, $features, $result, $modelVersion): Prediction {
-            $prediction = Prediction::create([
-                'toddler_id' => $measurement->toddler_id,
-                'measurement_id' => $measurement->id,
-                'model_version_id' => $modelVersion?->id,
-                'prediction_class' => $result['prediction_class'],
-                'prediction_label' => $result['prediction_label'],
-                'probability' => $result['probability'],
-                // Snapshot feature yang benar-benar dipakai, agar histori tidak
-                // ikut berubah bila data pemeriksaan disunting kemudian.
-                'input_snapshot_json' => $features,
-                'request_id' => $result['request_id'],
-                'predicted_by' => $user->id,
-                'predicted_at' => now(),
-            ]);
+            $prediction = $this->persist($measurement, $user, $features, $result, $modelVersion);
 
             $this->audit->log(
                 AuditLog::ACTION_PREDICT,
@@ -85,6 +74,86 @@ class PredictionService
 
             return $prediction;
         });
+    }
+
+    /** Pemeriksaan yang belum pernah diprediksi. */
+    public function pendingQuery(): Builder
+    {
+        return Measurement::query()->whereDoesntHave('predictions');
+    }
+
+    /**
+     * Prediksi banyak pemeriksaan sekaligus. Hanya hasil yang benar-benar
+     * dikembalikan model yang disimpan; item yang gagal dilewati.
+     *
+     * @param  Collection<int, Measurement>  $measurements
+     * @return array{success:int, failed:int, errors:array<string,int>}
+     *
+     * @throws MlApiException bila layanan belum dikonfigurasi
+     */
+    public function runBatch(Collection $measurements, User $user): array
+    {
+        $measurements->loadMissing('toddler');
+
+        $features = $measurements
+            ->mapWithKeys(fn (Measurement $m): array => [$m->id => $this->ml->buildFeatures($m)])
+            ->all();
+
+        $results = $this->ml->predictMany($features);
+
+        $success = 0;
+        $errors = [];
+
+        DB::transaction(function () use ($measurements, $user, $features, $results, &$success, &$errors): void {
+            $versions = [];
+
+            foreach ($measurements as $measurement) {
+                $result = $results[$measurement->id] ?? null;
+
+                if (! is_array($result)) {
+                    $message = $result instanceof MlApiException ? $result->getMessage() : 'Tidak ada respons dari layanan prediksi.';
+                    $errors[$message] = ($errors[$message] ?? 0) + 1;
+
+                    continue;
+                }
+
+                $versionKey = (string) $result['model_version'];
+                $versions[$versionKey] ??= $this->resolveModelVersion($result['model_version']);
+
+                $this->persist($measurement, $user, $features[$measurement->id], $result, $versions[$versionKey]);
+                $success++;
+            }
+        });
+
+        $failed = array_sum($errors);
+
+        $this->audit->log(
+            $success > 0 ? AuditLog::ACTION_PREDICT : AuditLog::ACTION_PREDICT_FAILED,
+            'prediction',
+            null,
+            sprintf('Prediksi massal: %d berhasil, %d gagal', $success, $failed),
+            $user,
+        );
+
+        return ['success' => $success, 'failed' => $failed, 'errors' => $errors];
+    }
+
+    private function persist(Measurement $measurement, User $user, array $features, array $result, ?ModelVersion $modelVersion): Prediction
+    {
+        return Prediction::create([
+            'toddler_id' => $measurement->toddler_id,
+            'measurement_id' => $measurement->id,
+            'model_version_id' => $modelVersion?->id,
+            'prediction_class' => $result['prediction_class'],
+            'prediction_label' => $result['prediction_label'],
+            'probability' => $result['probability'],
+            // Snapshot feature yang benar-benar dipakai, agar histori tidak
+            // ikut berubah bila data pemeriksaan disunting kemudian.
+            'input_snapshot_json' => $features,
+            'request_id' => $result['request_id'],
+            'predicted_by' => $user->id,
+            'predicted_at' => now(),
+        ]);
     }
 
     /**

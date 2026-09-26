@@ -79,6 +79,10 @@ Route::middleware(['auth', 'active'])->group(function (): void {
         Route::post('/prediksi', [PredictionController::class, 'store'])
             ->middleware('throttle:30,1')
             ->name('prediksi.store');
+        Route::get('/prediksi-massal', [PredictionController::class, 'batch'])->name('prediksi.batch');
+        Route::post('/prediksi-massal', [PredictionController::class, 'batchRun'])
+            ->middleware('throttle:60,1')
+            ->name('prediksi.batch.run');
     });
 
     // ------------------------------------------------- Import, Monitoring, Laporan

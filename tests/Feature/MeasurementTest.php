@@ -185,4 +185,20 @@ class MeasurementTest extends TestCase
         $this->assertSame(3, $toddler->measurements()->count());
         $this->assertSame([26, 29, 32], $toddler->measurements()->orderBy('measurement_date')->pluck('age_months')->all());
     }
+
+    public function test_paginasi_daftar_pemeriksaan_memakai_markup_bootstrap(): void
+    {
+        $petugas = $this->petugas();
+        $toddler = $this->toddlerFor($petugas, ['birth_date' => '2024-01-01']);
+
+        foreach (range(1, 16) as $day) {
+            $this->measurementFor($toddler, $petugas, ['measurement_date' => sprintf('2026-08-%02d', $day)]);
+        }
+
+        $this->actingAs($petugas)
+            ->get('/pemeriksaan')
+            ->assertOk()
+            ->assertSee('class="page-link"', false)
+            ->assertDontSee('<svg class="w-5 h-5"', false);
+    }
 }

@@ -7,6 +7,8 @@ namespace App\Services;
 use App\Exceptions\MlApiException;
 use App\Models\Measurement;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -58,11 +60,7 @@ class MlPredictionService
      */
     public function predict(array $features, ?string $requestId = null): array
     {
-        if (! $this->isConfigured()) {
-            Log::error('ML API belum dikonfigurasi (ML_API_URL / ML_API_KEY kosong).');
-
-            throw MlApiException::notConfigured();
-        }
+        $this->ensureConfigured();
 
         $requestId ??= (string) Str::uuid();
         $payload = array_merge(['request_id' => $requestId], $features);
@@ -70,14 +68,7 @@ class MlPredictionService
         $startedAt = microtime(true);
 
         try {
-            $response = Http::withHeaders([
-                'X-API-Key' => (string) $this->config['key'],
-                'Accept' => 'application/json',
-                'User-Agent' => 'SIPRESTI-Hostinger/1.0',
-            ])
-                ->connectTimeout((int) ($this->config['connect_timeout'] ?? 5))
-                ->timeout((int) ($this->config['timeout'] ?? 10))
-                ->asJson()
+            $response = $this->predictRequest(Http::asJson())
                 ->post($this->endpoint('/api/v1/predict'), $payload);
         } catch (ConnectionException $e) {
             Log::warning('ML API tidak dapat dihubungi', [
@@ -90,6 +81,80 @@ class MlPredictionService
 
         $durationMs = (int) round((microtime(true) - $startedAt) * 1000);
 
+        return $this->parsePrediction($response, $requestId, $durationMs);
+    }
+
+    /**
+     * Prediksi banyak pemeriksaan sekaligus dengan beberapa request paralel
+     * ke endpoint tunggal. Kegagalan satu item tidak menggagalkan item lain.
+     *
+     * @param  array<int|string, array>  $featuresByKey
+     * @return array<int|string, array|MlApiException>
+     *
+     * @throws MlApiException bila layanan belum dikonfigurasi
+     */
+    public function predictMany(array $featuresByKey, int $concurrency = 10): array
+    {
+        $this->ensureConfigured();
+
+        $results = [];
+
+        foreach (array_chunk($featuresByKey, max(1, $concurrency), true) as $chunk) {
+            $requestIds = array_map(static fn (): string => (string) Str::uuid(), $chunk);
+
+            $responses = Http::pool(function (Pool $pool) use ($chunk, $requestIds): void {
+                foreach ($chunk as $key => $features) {
+                    $this->predictRequest($pool->as((string) $key)->asJson())
+                        ->post($this->endpoint('/api/v1/predict'), array_merge(['request_id' => $requestIds[$key]], $features));
+                }
+            });
+
+            foreach ($chunk as $key => $_) {
+                $response = $responses[$key] ?? null;
+
+                try {
+                    if (! $response instanceof Response) {
+                        throw MlApiException::unavailable($response instanceof \Throwable ? $response->getMessage() : null);
+                    }
+
+                    $results[$key] = $this->parsePrediction($response, $requestIds[$key], null);
+                } catch (MlApiException $e) {
+                    $results[$key] = $e;
+                }
+            }
+        }
+
+        return $results;
+    }
+
+    private function ensureConfigured(): void
+    {
+        if (! $this->isConfigured()) {
+            Log::error('ML API belum dikonfigurasi (ML_API_URL / ML_API_KEY kosong).');
+
+            throw MlApiException::notConfigured();
+        }
+    }
+
+    private function predictRequest(PendingRequest $request): PendingRequest
+    {
+        return $request
+            ->withHeaders([
+                'X-API-Key' => (string) $this->config['key'],
+                'Accept' => 'application/json',
+                'User-Agent' => 'SIPRESTI-Hostinger/1.0',
+            ])
+            ->connectTimeout((int) ($this->config['connect_timeout'] ?? 5))
+            ->timeout((int) ($this->config['timeout'] ?? 10));
+    }
+
+    /**
+     * @return array{prediction_class:string, prediction_label:string, probability:float, model_version:?string, request_id:string}
+     *
+     * @throws MlApiException
+     */
+    private function parsePrediction(Response $response, string $requestId, ?int $durationMs): array
+    {
         if (! $response->successful()) {
             $this->throwFromErrorResponse($response, $requestId, $durationMs);
         }
