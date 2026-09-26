@@ -17,6 +17,7 @@ Laravel dapat dipakai langsung.
 | Akses SSH | hPanel → Advanced → SSH Access | Untuk menjalankan `php artisan` |
 | Document root | hPanel → Websites → domain | Harus dapat diarahkan ke `public/` |
 | `upload_max_filesize` | PHP Configuration | ≥ 12 MB agar import E-PPBGM aman |
+| `post_max_size` | PHP Configuration | **Harus lebih besar dari `upload_max_filesize`** (mis. 16 MB). Bila lebih kecil, seluruh isi POST (termasuk token CSRF) dibuang oleh PHP sebelum sampai ke Laravel — import gagal dan pengguna tampak "dilempar" keluar dari sesi |
 | `max_execution_time` | PHP Configuration | ≥ 120 detik |
 
 Bila SSH atau Composer tidak tersedia, jalankan `composer install --no-dev` di mesin
@@ -221,3 +222,4 @@ ketersediaannya di hPanel → Files → Backups.
 | Sesi hilang berulang | `SESSION_SECURE_COOKIE=true` tanpa HTTPS | Aktifkan SSL |
 | Import gagal untuk berkas besar | `upload_max_filesize` kecil | Naikkan di PHP Configuration |
 | Prediksi selalu gagal | `ML_API_URL`/`ML_API_KEY` salah | Cek Admin → Pengaturan, samakan dengan Vercel |
+| Import CSV/XLSX selalu melempar ke halaman login | `post_max_size` di PHP Configuration lebih kecil dari ukuran berkas (atau lebih kecil dari `upload_max_filesize`) sehingga token CSRF ikut terbuang | Naikkan `post_max_size` di atas `upload_max_filesize`, lalu ulangi unggah |
