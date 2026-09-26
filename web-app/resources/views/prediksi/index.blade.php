@@ -6,6 +6,9 @@
 
 @section('page-actions')
     @if (auth()->user()->isPetugasGizi())
+        <a href="{{ route('prediksi.batch') }}" class="btn btn-outline-primary">
+            <i class="bi bi-collection-play me-1"></i>Prediksi Semua Data
+        </a>
         <a href="{{ route('prediksi.create') }}" class="btn btn-primary">
             <i class="bi bi-play-circle me-1"></i>Analisis Baru
         </a>

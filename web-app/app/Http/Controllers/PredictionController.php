@@ -11,12 +11,16 @@ use App\Models\Prediction;
 use App\Models\Toddler;
 use App\Services\MlPredictionService;
 use App\Services\PredictionService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
 class PredictionController extends Controller
 {
+    /** Kecil agar tiap request selesai jauh di bawah batas waktu shared hosting. */
+    private const BATCH_SIZE = 50;
+
     public function __construct(
         private readonly PredictionService $predictions,
         private readonly MlPredictionService $ml,
@@ -85,6 +89,46 @@ class PredictionController extends Controller
         return redirect()
             ->route('prediksi.show', $prediction)
             ->with('toast', ['message' => 'Analisis risiko selesai.', 'type' => 'success']);
+    }
+
+    public function batch(): View
+    {
+        return view('prediksi.batch', [
+            'pending' => $this->predictions->pendingQuery()->count(),
+            'total' => Measurement::query()->count(),
+            'health' => $this->ml->health(),
+        ]);
+    }
+
+    /** Satu putaran prediksi massal; dipanggil berulang oleh halaman sampai selesai. */
+    public function batchRun(Request $request): JsonResponse
+    {
+        $afterId = max(0, $request->integer('after_id'));
+
+        $measurements = $this->predictions->pendingQuery()
+            ->where('id', '>', $afterId)
+            ->orderBy('id')
+            ->limit(self::BATCH_SIZE)
+            ->get();
+
+        if ($measurements->isEmpty()) {
+            return response()->json(['success' => 0, 'failed' => 0, 'errors' => [], 'last_id' => $afterId, 'remaining' => 0, 'done' => true]);
+        }
+
+        try {
+            $result = $this->predictions->runBatch($measurements, $request->user());
+        } catch (MlApiException $e) {
+            return response()->json(['message' => $e->getMessage()], 503);
+        }
+
+        $lastId = (int) $measurements->last()->id;
+        $remaining = $this->predictions->pendingQuery()->where('id', '>', $lastId)->count();
+
+        return response()->json($result + [
+            'last_id' => $lastId,
+            'remaining' => $remaining,
+            'done' => $remaining === 0,
+        ]);
     }
 
     public function show(Prediction $prediction): View
