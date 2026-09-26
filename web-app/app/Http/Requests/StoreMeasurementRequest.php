@@ -29,6 +29,7 @@ class StoreMeasurementRequest extends FormRequest
             ],
             'weight_kg' => ['required', 'numeric', 'between:'.$cfg['weight_kg_min'].','.$cfg['weight_kg_max']],
             'height_cm' => ['required', 'numeric', 'between:'.$cfg['height_cm_min'].','.$cfg['height_cm_max']],
+            'muac_cm' => ['nullable', 'numeric', 'between:'.$cfg['muac_cm_min'].','.$cfg['muac_cm_max']],
         ];
     }
 
@@ -39,6 +40,7 @@ class StoreMeasurementRequest extends FormRequest
             'measurement_date' => 'tanggal pemeriksaan',
             'weight_kg' => 'berat badan',
             'height_cm' => 'tinggi/panjang badan',
+            'muac_cm' => 'LiLA',
         ];
     }
 
@@ -49,6 +51,7 @@ class StoreMeasurementRequest extends FormRequest
             'measurement_date.before_or_equal' => 'Tanggal pemeriksaan tidak boleh melebihi hari ini.',
             'weight_kg.between' => 'Berat badan di luar batas wajar. Periksa kembali hasil penimbangan.',
             'height_cm.between' => 'Tinggi/panjang badan di luar batas wajar. Periksa kembali hasil pengukuran.',
+            'muac_cm.between' => 'LiLA di luar batas wajar. Periksa kembali hasil pengukuran.',
         ];
     }
 

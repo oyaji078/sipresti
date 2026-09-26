@@ -49,6 +49,8 @@ return [
         'weight_kg_max' => 60.0,
         'height_cm_min' => 20.0,
         'height_cm_max' => 150.0,
+        'muac_cm_min' => 5.0,
+        'muac_cm_max' => 30.0,
     ],
 
     /*

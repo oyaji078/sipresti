@@ -82,6 +82,9 @@
                     <dt class="col-5 text-muted fw-normal">Tanggal Pemeriksaan</dt>
                     <dd class="col-7">{{ $measurement->measurement_date->format('d/m/Y') }}</dd>
 
+                    <dt class="col-5 text-muted fw-normal">LiLA</dt>
+                    <dd class="col-7">{{ $measurement->muac_cm ? $measurement->muac_cm.' cm' : 'Tidak diukur' }}</dd>
+
                     <dt class="col-5 text-muted fw-normal">Sumber Data</dt>
                     <dd class="col-7"><span class="badge {{ $measurement->source->badgeClass() }}">{{ $measurement->source->label() }}</span></dd>
 

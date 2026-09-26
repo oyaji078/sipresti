@@ -25,6 +25,10 @@
             <i class="bi bi-clipboard2-pulse"></i><span>{{ $user->isAdmin() ? 'Data Pemeriksaan' : 'Pemeriksaan' }}</span>
         </a>
 
+        <a href="{{ route('perkembangan.index') }}" class="sip-nav-link {{ request()->routeIs('perkembangan.*') ? 'active' : '' }}">
+            <i class="bi bi-graph-up"></i><span>Perkembangan Balita</span>
+        </a>
+
         <a href="{{ route('prediksi.index') }}" class="sip-nav-link {{ request()->routeIs('prediksi.*') ? 'active' : '' }}">
             <i class="bi bi-cpu"></i><span>{{ $user->isAdmin() ? 'Hasil Prediksi' : 'Prediksi Stunting' }}</span>
         </a>

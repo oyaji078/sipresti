@@ -143,6 +143,7 @@
                             <th>Usia</th>
                             <th>BB</th>
                             <th>TB</th>
+                            <th>LiLA</th>
                             <th>Sumber</th>
                             <th class="text-end">Aksi</th>
                         </tr>
@@ -154,13 +155,17 @@
                                 <td class="small">{{ $m->age_months }} bln</td>
                                 <td class="small">{{ $m->weight_kg }} kg</td>
                                 <td class="small">{{ $m->height_cm }} cm</td>
+                                <td class="small">{{ $m->muac_cm ? $m->muac_cm.' cm' : '-' }}</td>
                                 <td><span class="badge {{ $m->source->badgeClass() }}">{{ $m->source->label() }}</span></td>
                                 <td class="text-end">
-                                    <a href="{{ route('pemeriksaan.show', $m) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-eye"></i></a>
+                                    <a href="{{ route('pemeriksaan.show', $m) }}" class="btn btn-sm btn-outline-secondary" title="Detail"><i class="bi bi-eye"></i></a>
+                                    @if (auth()->user()->isPetugasGizi())
+                                        <a href="{{ route('pemeriksaan.edit', $m) }}" class="btn btn-sm btn-outline-secondary" title="Ubah"><i class="bi bi-pencil"></i></a>
+                                    @endif
                                 </td>
                             </tr>
                         @empty
-                            <tr><td colspan="6"><div class="sip-empty"><i class="bi bi-clipboard2-x"></i>Belum ada pemeriksaan.</div></td></tr>
+                            <tr><td colspan="7"><div class="sip-empty"><i class="bi bi-clipboard2-x"></i>Belum ada pemeriksaan.</div></td></tr>
                         @endforelse
                     </tbody>
                 </table>

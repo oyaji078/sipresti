@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\SettingController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\GrowthController;
 use App\Http\Controllers\ImportController;
 use App\Http\Controllers\MeasurementController;
 use App\Http\Controllers\MonitoringController;
@@ -69,6 +70,8 @@ Route::middleware(['auth', 'active'])->group(function (): void {
         Route::delete('/pemeriksaan/{measurement}', [MeasurementController::class, 'destroy'])->name('pemeriksaan.destroy');
     });
 
+    Route::get('/perkembangan', [GrowthController::class, 'index'])->name('perkembangan.index');
+
     // -------------------------------------------------------------- Prediksi
     Route::get('/prediksi', [PredictionController::class, 'index'])->name('prediksi.index');
     Route::get('/prediksi/{prediction}', [PredictionController::class, 'show'])
@@ -94,6 +97,8 @@ Route::middleware(['auth', 'active'])->group(function (): void {
         Route::post('/import/commit', [ImportController::class, 'commit'])->name('import.commit');
         Route::get('/import/{importHistory}', [ImportController::class, 'show'])
             ->whereNumber('importHistory')->name('import.show');
+        Route::post('/import/{importHistory}/lengkapi', [ImportController::class, 'backfill'])
+            ->whereNumber('importHistory')->name('import.backfill');
         Route::get('/import-template', [ImportController::class, 'template'])->name('import.template');
 
         Route::get('/monitoring', [MonitoringController::class, 'index'])->name('monitoring.index');

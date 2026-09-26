@@ -186,6 +186,22 @@ class MeasurementTest extends TestCase
         $this->assertSame([26, 29, 32], $toddler->measurements()->orderBy('measurement_date')->pluck('age_months')->all());
     }
 
+    public function test_lila_opsional_disimpan_dan_divalidasi(): void
+    {
+        $petugas = $this->petugas();
+        $toddler = $this->toddlerFor($petugas, ['birth_date' => '2024-03-15']);
+        $data = ['toddler_id' => $toddler->id, 'weight_kg' => 11.4, 'height_cm' => 86.5];
+
+        $this->actingAs($petugas)->post('/pemeriksaan', $data + ['measurement_date' => '2026-09-20', 'muac_cm' => 14.2])
+            ->assertSessionHasNoErrors();
+        $this->actingAs($petugas)->post('/pemeriksaan', $data + ['measurement_date' => '2026-09-21', 'muac_cm' => ''])
+            ->assertSessionHasNoErrors();
+        $this->actingAs($petugas)->post('/pemeriksaan', $data + ['measurement_date' => '2026-09-22', 'muac_cm' => 80])
+            ->assertSessionHasErrors('muac_cm');
+
+        $this->assertSame(['14.2', null], Measurement::orderBy('measurement_date')->pluck('muac_cm')->all());
+    }
+
     public function test_paginasi_daftar_pemeriksaan_memakai_markup_bootstrap(): void
     {
         $petugas = $this->petugas();

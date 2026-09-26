@@ -99,7 +99,7 @@ class ReportService
     {
         return match ($type) {
             self::TYPE_MEASUREMENT => [
-                ['Tanggal', 'Kode', 'Nama', 'JK', 'Usia (bulan)', 'BB (kg)', 'TB (cm)', 'Desa', 'Posyandu', 'Sumber'],
+                ['Tanggal', 'Kode', 'Nama', 'JK', 'Usia (bulan)', 'BB (kg)', 'TB (cm)', 'LiLA (cm)', 'Desa', 'Posyandu', 'Sumber'],
                 fn (Measurement $m) => [
                     $m->measurement_date->format('d/m/Y'),
                     $m->toddler->code,
@@ -108,6 +108,7 @@ class ReportService
                     $m->age_months,
                     $m->weight_kg,
                     $m->height_cm,
+                    $m->muac_cm,
                     $m->toddler->village,
                     $m->toddler->posyandu,
                     $m->source->value,
