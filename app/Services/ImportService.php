@@ -42,7 +42,43 @@ class ImportService
         'posyandu' => ['label' => 'Posyandu', 'required' => false],
     ];
 
+    /** Nama kolom umum (ekspor E-PPBGM & template) untuk pemetaan otomatis. */
+    private const HEADER_ALIASES = [
+        'name' => ['nama', 'nama balita', 'nama anak'],
+        'nik' => ['nik', 'nik anak', 'nik balita'],
+        'birth_date' => ['tgl lahir', 'tanggal lahir', 'tanggal_lahir'],
+        'gender' => ['jk', 'jenis kelamin', 'jenis_kelamin', 'l/p'],
+        'measurement_date' => ['tanggal pengukuran', 'tgl pengukuran', 'tanggal_pengukuran', 'tgl ukur', 'tanggal ukur'],
+        'weight_kg' => ['berat', 'bb', 'berat badan', 'berat_kg', 'bb (kg)'],
+        'height_cm' => ['tinggi', 'tb', 'tinggi badan', 'panjang badan', 'tinggi_cm', 'tb (cm)'],
+        'mother_name' => ['nama ortu', 'nama ibu', 'nama orang tua', 'nama_ibu'],
+        'address' => ['alamat'],
+        'village' => ['desa/kel', 'desa', 'kelurahan', 'desa/kelurahan'],
+        'posyandu' => ['posyandu'],
+    ];
+
     public function __construct(private readonly AuditService $audit) {}
+
+    /**
+     * @param  array<int, string>  $header
+     * @return array<string, int> field sistem => indeks kolom
+     */
+    public static function guessMapping(array $header): array
+    {
+        $normalized = array_map(static fn ($h): string => mb_strtolower(trim((string) $h)), $header);
+        $mapping = [];
+
+        foreach (self::HEADER_ALIASES as $field => $aliases) {
+            foreach ($normalized as $index => $name) {
+                if (in_array($name, $aliases, true)) {
+                    $mapping[$field] = $index;
+                    break;
+                }
+            }
+        }
+
+        return $mapping;
+    }
 
     // ------------------------------------------------------------------ baca
     /**
@@ -65,10 +101,7 @@ class ImportService
             throw new \RuntimeException('Berkas kosong atau tidak dapat dibaca.');
         }
 
-        $header = array_map(
-            static fn ($v): string => trim((string) $v),
-            array_shift($rows)
-        );
+        $header = array_shift($rows);
 
         return [
             'path' => $path,
@@ -82,6 +115,11 @@ class ImportService
     /** @return array<int, array<int, string>> */
     private function readRows(string $absolutePath, string $extension): array
     {
+        // Unduhan "Excel" dari E-PPBGM sebenarnya tabel HTML berekstensi .xls.
+        if ($this->looksLikeHtml($absolutePath)) {
+            return $this->readHtmlTable($absolutePath);
+        }
+
         if ($extension === 'csv') {
             return $this->readCsv($absolutePath);
         }
@@ -105,7 +143,7 @@ class ImportService
                     $value = ExcelDate::excelToDateTimeObject((float) $value)->format('Y-m-d');
                 }
 
-                $cells[] = is_null($value) ? '' : trim((string) $value);
+                $cells[] = $this->cleanCell($value);
             }
 
             if (array_filter($cells, static fn ($v) => $v !== '') !== []) {
@@ -134,8 +172,12 @@ class ImportService
         $delimiter = substr_count($firstLine, ';') > substr_count($firstLine, ',') ? ';' : ',';
 
         $rows = [];
-        while (($data = fgetcsv($handle, 0, $delimiter)) !== false) {
-            $cells = array_map(static fn ($v): string => trim((string) $v), $data);
+        while (($data = fgetcsv($handle, 0, $delimiter, '"', '')) !== false) {
+            if ($rows === [] && isset($data[0])) {
+                $data[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $data[0]) ?? $data[0];
+            }
+
+            $cells = array_map($this->cleanCell(...), $data);
 
             if (array_filter($cells, static fn ($v) => $v !== '') !== []) {
                 $rows[] = $cells;
@@ -144,12 +186,70 @@ class ImportService
 
         fclose($handle);
 
-        if ($rows !== []) {
-            // Buang BOM pada sel pertama bila ada.
-            $rows[0][0] = preg_replace('/^\xEF\xBB\xBF/', '', $rows[0][0]) ?? $rows[0][0];
+        return $rows;
+    }
+
+    private function looksLikeHtml(string $absolutePath): bool
+    {
+        $head = (string) file_get_contents($absolutePath, false, null, 0, 1024);
+
+        return preg_match('/^(\xEF\xBB\xBF)?\s*<(!doctype|html|table|meta)\b/i', $head) === 1;
+    }
+
+    /** @return array<int, array<int, string>> */
+    private function readHtmlTable(string $absolutePath): array
+    {
+        $html = $this->toUtf8((string) file_get_contents($absolutePath));
+
+        // Markup E-PPBGM tidak valid (mis. <head> salah tempat); peringatan libxml
+        // diredam agar tidak diubah Laravel menjadi exception.
+        $previous = libxml_use_internal_errors(true);
+        $dom = new \DOMDocument;
+        $dom->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_NONET | LIBXML_COMPACT);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        $table = $dom->getElementsByTagName('table')->item(0);
+
+        if (! $table instanceof \DOMElement) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($table->getElementsByTagName('tr') as $tr) {
+            $cells = [];
+            foreach ($tr->childNodes as $node) {
+                if ($node instanceof \DOMElement && in_array(strtolower($node->nodeName), ['td', 'th'], true)) {
+                    $cells[] = $this->cleanCell($node->textContent);
+                }
+            }
+
+            if (array_filter($cells, static fn ($v) => $v !== '') !== []) {
+                $rows[] = $cells;
+            }
         }
 
         return $rows;
+    }
+
+    /**
+     * Semua sel dijadikan UTF-8 valid. Sel non-UTF-8 (CSV "ANSI" dari Excel
+     * Windows) yang masuk ke sesi membuat serialisasi JSON sesi gagal dan
+     * pengguna ikut ter-logout.
+     */
+    private function cleanCell(mixed $value): string
+    {
+        $value = $this->toUtf8((string) $value);
+        $value = str_replace("\u{00A0}", ' ', $value);
+
+        return trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
+    }
+
+    private function toUtf8(string $value): string
+    {
+        return mb_check_encoding($value, 'UTF-8')
+            ? $value
+            : mb_convert_encoding($value, 'UTF-8', 'Windows-1252');
     }
 
     // -------------------------------------------------------------- validasi

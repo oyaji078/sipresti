@@ -107,7 +107,7 @@
                                         $label = $col !== '' ? $col : 'Kolom '.($i + 1);
                                     @endphp
                                     <option value="{{ $i }}"
-                                        @selected(($preview['mapping'][$field] ?? null) == $i || (! $preview && Str::slug($col, '_') === $field))>
+                                        @selected($preview ? (string) ($preview['mapping'][$field] ?? '') === (string) $i : ($guessed[$field] ?? null) === $i)>
                                         {{ $label }}
                                     </option>
                                 @endforeach
