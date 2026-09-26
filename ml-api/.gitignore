@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.env
+.vercel/
+.pytest_cache/
+
+# Artifact model besar & dataset pasien TIDAK boleh masuk repository
+models/*.json
+!models/metadata.example.json
+models/*.joblib
+models/*.ubj
+training/data/
+*.csv
+*.xlsx

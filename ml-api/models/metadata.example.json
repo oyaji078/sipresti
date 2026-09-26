@@ -1,0 +1,62 @@
+{
+  "_catatan": "CONTOH STRUKTUR metadata.json. Berkas sebenarnya dihasilkan oleh training/train.py. Seluruh nilai di bawah adalah placeholder null/kosong — dilarang diisi angka karangan.",
+
+  "version": "XGB-1.0.0",
+  "algorithm": "XGBoost",
+
+  "features": ["gender", "age_months", "weight_kg", "height_cm"],
+  "feature_order": ["gender", "age_months", "weight_kg", "height_cm"],
+
+  "gender_encoding": {},
+  "label_mapping": {},
+
+  "trained_at": null,
+  "random_state": null,
+  "dataset_fingerprint": null,
+  "dataset_file": null,
+  "source_columns": {},
+
+  "library_versions": {
+    "python": null,
+    "xgboost": null,
+    "numpy": null,
+    "pandas": null
+  },
+
+  "parameters": {},
+
+  "split": {
+    "dataset_size": null,
+    "training_size": null,
+    "testing_size": null,
+    "test_size": null,
+    "grouped_by": null
+  },
+
+  "metrics": {
+    "accuracy": null,
+    "precision": null,
+    "recall": null,
+    "f1_score": null,
+    "roc_auc": null
+  },
+
+  "confusion_matrix": null,
+  "feature_importance": {},
+
+  "leakage_check": {
+    "probe_train_accuracy": null,
+    "suspected": null
+  },
+
+  "checksum": null,
+  "artifact_name": "xgboost_model.json",
+
+  "observed_ranges": {
+    "age_months": null,
+    "weight_kg": null,
+    "height_cm": null
+  },
+
+  "note": ""
+}

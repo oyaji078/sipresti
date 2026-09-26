@@ -1,0 +1,78 @@
+# ---------------------------------------------------------------------------
+# Rahasia dan konfigurasi lingkungan
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ---------------------------------------------------------------------------
+# DATA PASIEN — dilarang masuk repositori
+# ---------------------------------------------------------------------------
+*.csv
+*.xlsx
+*.xls
+!**/template-*.csv
+ml-api/training/data/
+web-app/storage/app/private/imports/
+web-app/storage/app/imports/
+dump/
+*.sql
+*.sql.gz
+
+# ---------------------------------------------------------------------------
+# Artifact model (besar; dikirim lewat deployment, bukan repositori)
+# ---------------------------------------------------------------------------
+ml-api/models/*.json
+!ml-api/models/metadata.example.json
+ml-api/models/*.joblib
+ml-api/models/*.ubj
+
+# ---------------------------------------------------------------------------
+# Dependensi
+# ---------------------------------------------------------------------------
+/vendor/
+web-app/vendor/
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# ---------------------------------------------------------------------------
+# Laravel
+# ---------------------------------------------------------------------------
+web-app/storage/*.key
+web-app/storage/framework/cache/*
+web-app/storage/framework/sessions/*
+web-app/storage/framework/views/*
+web-app/storage/logs/*
+!web-app/storage/**/.gitignore
+web-app/bootstrap/cache/*
+!web-app/bootstrap/cache/.gitignore
+web-app/public/storage
+web-app/public/hot
+web-app/.phpunit.result.cache
+web-app/.phpunit.cache/
+*.sqlite
+*.sqlite-journal
+
+# ---------------------------------------------------------------------------
+# Python / Vercel
+# ---------------------------------------------------------------------------
+.vercel/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# ---------------------------------------------------------------------------
+# Peralatan & sistem operasi
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
