@@ -1,0 +1,18 @@
+# Vercel menggunakan berkas ini SEBAGAI GANTI .gitignore (tidak digabung).
+# Artifact ONNX dan metadata sengaja TIDAK diabaikan karena deploy ml-api
+# dilakukan lewat `vercel --prod` dari lokal. Artifact XGBoost native tidak
+# diperlukan di runtime produksi.
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+training/
+.env
+.env.local
+.git/
+.gitignore
+README.md
+models/xgboost_model.json

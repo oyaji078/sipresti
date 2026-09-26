@@ -28,7 +28,10 @@ from ml.preprocessing import PreprocessingError, build_feature_vector, encode_ge
 from ml.validator import ValidationError, validate_payload  # noqa: E402
 
 MODEL_DIR = BASE_DIR / "models"
-MODEL_AVAILABLE = (MODEL_DIR / "xgboost_model.json").exists() and (MODEL_DIR / "metadata.json").exists()
+MODEL_AVAILABLE = (
+    (MODEL_DIR / "xgboost_model.onnx").exists()
+    or (MODEL_DIR / "xgboost_model.json").exists()
+) and (MODEL_DIR / "metadata.json").exists()
 requires_model = pytest.mark.skipif(not MODEL_AVAILABLE, reason="artifact model belum tersedia")
 
 VALID_PAYLOAD = {
@@ -240,6 +243,7 @@ def test_model_dapat_dimuat():
 
     assert predictor.is_ready is True
     assert predictor.model_version
+    assert predictor.runtime_format in {"ONNX", "XGBoost"}
 
 
 @requires_model

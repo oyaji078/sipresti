@@ -1,0 +1,18 @@
+# Laravel pada shared hosting: seluruh request publik dilayani dari /public.
+Options -Indexes
+
+<FilesMatch "^\.(env|git|htpasswd)|\.(env|log|sql|lock|md|sh|yaml|yml|xml|dist)$|^(artisan|composer\.json|package\.json)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    RewriteCond %{HTTPS} off
+    RewriteCond %{REQUEST_URI} !^/\.well-known/
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
+
+    RewriteCond %{REQUEST_URI} !^/\.well-known/
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>

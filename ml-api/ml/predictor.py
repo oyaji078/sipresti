@@ -1,4 +1,4 @@
-"""Pemuat model XGBoost dan mesin inferensi.
+"""Pemuat model XGBoost dan mesin inferensi ONNX/XGBoost.
 
 Model dimuat SATU KALI saat modul diinisialisasi, bukan per request.
 Bila artifact model belum tersedia, predictor berstatus "belum siap" dan API
@@ -17,7 +17,8 @@ from .preprocessing import PreprocessingError, build_feature_vector
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL_DIR = BASE_DIR / "models"
-MODEL_FILENAME = "xgboost_model.json"
+ONNX_MODEL_FILENAME = "xgboost_model.onnx"
+XGBOOST_MODEL_FILENAME = "xgboost_model.json"
 METADATA_FILENAME = "metadata.json"
 
 
@@ -30,13 +31,17 @@ class Predictor:
         self._lock = threading.Lock()
         self.model_dir = Path(model_dir or os.environ.get("MODEL_PATH") or DEFAULT_MODEL_DIR)
         self.model: Any = None
+        self.runtime_format: str | None = None
+        self.input_name: str | None = None
+        self.output_names: list[str] = []
         self.metadata: dict[str, Any] = {}
         self.load_error: str | None = None
         self._load()
 
     # ------------------------------------------------------------------ load
     def _load(self) -> None:
-        model_file = self.model_dir / MODEL_FILENAME
+        onnx_model_file = self.model_dir / ONNX_MODEL_FILENAME
+        xgboost_model_file = self.model_dir / XGBOOST_MODEL_FILENAME
         metadata_file = self.model_dir / METADATA_FILENAME
 
         if metadata_file.exists():
@@ -46,24 +51,44 @@ class Predictor:
                 self.metadata = {}
                 self.load_error = f"metadata.json tidak dapat dibaca: {exc}"
 
-        if not model_file.exists():
+        if not onnx_model_file.exists() and not xgboost_model_file.exists():
             self.load_error = self.load_error or "Artifact model belum tersedia."
             return
 
-        try:
-            import xgboost as xgb
-        except ImportError as exc:  # pragma: no cover - bergantung environment
-            self.load_error = f"Library xgboost tidak tersedia: {exc}"
-            return
+        # ONNX diprioritaskan karena runtime produksinya jauh lebih kecil untuk
+        # Vercel. Artifact XGBoost native tetap menjadi fallback pengembangan.
+        if onnx_model_file.exists():
+            try:
+                import onnxruntime as ort
 
-        try:
-            booster = xgb.Booster()
-            booster.load_model(str(model_file))
-            self.model = booster
-            self.load_error = None
-        except Exception as exc:  # noqa: BLE001 - kegagalan load harus dilaporkan apa adanya
-            self.model = None
-            self.load_error = f"Model gagal dimuat: {exc}"
+                session = ort.InferenceSession(
+                    str(onnx_model_file),
+                    providers=["CPUExecutionProvider"],
+                )
+                self.model = session
+                self.runtime_format = "ONNX"
+                self.input_name = session.get_inputs()[0].name
+                self.output_names = [output.name for output in session.get_outputs()]
+                self.load_error = None
+                return
+            except Exception as exc:  # noqa: BLE001 - coba fallback native di bawah
+                self.load_error = f"Model ONNX gagal dimuat: {exc}"
+
+        if xgboost_model_file.exists():
+            try:
+                import xgboost as xgb
+
+                booster = xgb.Booster()
+                booster.load_model(str(xgboost_model_file))
+                self.model = booster
+                self.runtime_format = "XGBoost"
+                self.load_error = None
+                return
+            except Exception as exc:  # noqa: BLE001 - kegagalan load harus dilaporkan apa adanya
+                self.model = None
+                self.runtime_format = None
+                fallback_error = f"Model XGBoost gagal dimuat: {exc}"
+                self.load_error = f"{self.load_error}; {fallback_error}" if self.load_error else fallback_error
 
     # --------------------------------------------------------------- helpers
     @property
@@ -84,6 +109,7 @@ class Predictor:
         return {
             "model_version": self.model_version,
             "algorithm": self.metadata.get("algorithm"),
+            "runtime_format": self.runtime_format,
             "features": self.metadata.get("features"),
             "feature_order": self.metadata.get("feature_order"),
             "label_mapping": self.metadata.get("label_mapping"),
@@ -115,20 +141,39 @@ class Predictor:
             raise ModelNotReadyError(self.load_error or "Model belum siap.")
 
         import numpy as np
-        import xgboost as xgb
-
         try:
             vector = build_feature_vector(payload, self.metadata)
         except PreprocessingError as exc:
             raise ValueError(str(exc)) from exc
 
-        feature_names = self.metadata.get("feature_order") or self.metadata.get("features")
-        matrix = xgb.DMatrix(np.array([vector], dtype="float32"), feature_names=list(feature_names))
+        matrix = np.array([vector], dtype="float32")
 
-        with self._lock:
-            raw = self.model.predict(matrix)
+        if self.runtime_format == "ONNX":
+            if not self.input_name:
+                raise ModelNotReadyError("Nama input model ONNX tidak tersedia.")
+            with self._lock:
+                outputs = self.model.run(None, {self.input_name: matrix})
 
-        raw_row = np.atleast_1d(raw[0])
+            named_outputs = dict(zip(self.output_names, outputs))
+            probabilities_output = named_outputs.get("probabilities")
+            if probabilities_output is None:
+                probabilities_output = next(
+                    (value for value in outputs if np.asarray(value).ndim == 2),
+                    None,
+                )
+            if probabilities_output is None:
+                raise RuntimeError("Model ONNX tidak menghasilkan vektor probabilitas.")
+            raw_row = np.asarray(probabilities_output[0], dtype="float32")
+        elif self.runtime_format == "XGBoost":
+            import xgboost as xgb
+
+            feature_names = self.metadata.get("feature_order") or self.metadata.get("features")
+            dmatrix = xgb.DMatrix(matrix, feature_names=list(feature_names))
+            with self._lock:
+                raw = self.model.predict(dmatrix)
+            raw_row = np.atleast_1d(raw[0])
+        else:
+            raise ModelNotReadyError("Runtime model tidak dikenali.")
 
         if raw_row.size == 1:
             # Objective biner: keluaran adalah probabilitas kelas positif.

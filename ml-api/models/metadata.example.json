@@ -51,6 +51,9 @@
 
   "checksum": null,
   "artifact_name": "xgboost_model.json",
+  "runtime_format": "ONNX",
+  "runtime_artifact": "xgboost_model.onnx",
+  "runtime_checksum": null,
 
   "observed_ranges": {
     "age_months": null,

@@ -179,7 +179,8 @@ mencatat `PREDICT_FAILED` pada audit log dan menampilkan pesan apa adanya.
 7. Vercel memverifikasi API key secara constant-time.
 8. Vercel memvalidasi payload.
 9. Vercel melakukan preprocessing sesuai `metadata.json`.
-10. XGBoost menjalankan `predict()` dan `predict_proba()`.
+10. ONNX Runtime menjalankan artifact hasil training XGBoost dan menghasilkan
+    kelas serta probabilitas.
 11. Vercel mengembalikan JSON.
 12. Hostinger memvalidasi struktur respons dan rentang probabilitas.
 13. Hostinger menyimpan prediksi + `input_snapshot_json` dan menulis audit log

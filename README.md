@@ -202,8 +202,10 @@ Skrip ini:
 5. **Tidak** menyeimbangkan kelas secara otomatis; gunakan
    `--balance scale_pos_weight` bila memang diperlukan.
 6. Melaporkan Accuracy, Precision, Recall, F1-score, Confusion Matrix, ROC-AUC.
-7. Menulis `models/xgboost_model.json` dan `models/metadata.json` —
-   seluruh metrik berasal dari evaluasi nyata.
+7. Menulis `models/xgboost_model.json`, mengonversinya menjadi
+   `models/xgboost_model.onnx`, dan menulis `models/metadata.json` — seluruh
+   metrik berasal dari evaluasi nyata. Training tetap menggunakan XGBoost;
+   ONNX hanya dipakai sebagai runtime inferensi yang lebih kecil di Vercel.
 
 Setelah model tersedia: deploy ML API, lalu buka **Admin → Model XGBoost →
 Sinkronisasi** untuk mencatat versi dan metriknya ke basis data.

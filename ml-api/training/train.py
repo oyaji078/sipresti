@@ -459,7 +459,14 @@ def main() -> None:
     metadata_path = out_dir / "metadata.json"
     metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    # Artifact native tetap disimpan untuk reproducibility. Artifact ONNX
+    # dipakai oleh runtime Vercel agar bundle tidak membawa library XGBoost.
+    from convert_to_onnx import convert as convert_to_onnx
+
+    onnx_path = convert_to_onnx(out_dir)
+
     log(f"Model    : {model_path}")
+    log(f"ONNX     : {onnx_path}")
     log(f"Metadata : {metadata_path}")
     log(f"Checksum : {checksum}")
     log()

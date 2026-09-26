@@ -11,6 +11,10 @@ models/*.json
 !models/metadata.example.json
 models/*.joblib
 models/*.ubj
+models/*.onnx
 training/data/
 *.csv
 *.xlsx
+
+.vercel
+.env*

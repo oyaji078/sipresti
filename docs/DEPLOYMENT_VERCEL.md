@@ -1,7 +1,7 @@
 # Deployment ML API ke Vercel
 
 Target: `https://ml.<domain-utama>` — layanan Python/Flask yang menjalankan
-inferensi XGBoost.
+inferensi model XGBoost melalui artifact ONNX.
 
 ---
 
@@ -10,7 +10,7 @@ inferensi XGBoost.
 Pastikan artifact model sudah ada:
 
 ```
-ml-api/models/xgboost_model.json
+ml-api/models/xgboost_model.onnx
 ml-api/models/metadata.json
 ```
 
@@ -38,9 +38,9 @@ ml-api/
 │   ├── validator.py
 │   └── preprocessing.py
 ├── models/
-│   ├── xgboost_model.json
+│   ├── xgboost_model.onnx
 │   └── metadata.json
-├── requirements.txt      HANYA flask, xgboost, numpy
+├── requirements.txt      HANYA flask, onnxruntime, numpy
 └── vercel.json
 ```
 
@@ -65,7 +65,7 @@ vercel --prod     # deployment produksi
 ### 3.2 Melalui Git
 
 Hubungkan repositori di dashboard Vercel, lalu atur **Root Directory** ke `ml-api`.
-Karena `models/*.json` masuk `.gitignore`, pilih salah satu:
+Karena artifact model masuk `.gitignore`, pilih salah satu:
 
 - deploy lewat CLI dari mesin lokal (model ikut terunggah), atau
 - buat pengecualian khusus untuk berkas model pada repositori privat, atau
@@ -155,15 +155,16 @@ Verifikasi dari aplikasi: **Admin → Model XGBoost**. Status harus "Terhubung" 
 
 ## 8. Ukuran Bundle
 
-`xgboost` untuk Linux berukuran besar, dan fungsi serverless Vercel punya batas
-ukuran bundle. **Ukur dulu** hasil build sebelum mengambil kesimpulan.
+Deployment native dengan `xgboost==2.1.4` telah diukur menghasilkan bundle
+969,46 MB dan melewati batas fungsi Vercel 500 MB. Karena itu runtime produksi
+menggunakan artifact ONNX; training dan evaluasi tetap memakai XGBoost asli.
 
 Bila deployment gagal karena ukuran, urutan penanganan:
 
 | Langkah | Cara | Catatan |
 |---|---|---|
-| 1 | Pastikan `requirements.txt` hanya memuat `flask`, `xgboost`, `numpy` | Sering sudah cukup |
-| 2 | Konversi artifact ke ONNX, inferensi dengan `onnxruntime` | Training tetap XGBoost asli; klaim penelitian tetap sah |
+| 1 | Gunakan artifact `xgboost_model.onnx` dan `onnxruntime` | Implementasi aktif pada proyek ini |
+| 2 | Pastikan `xgboost` hanya ada di `training/requirements-training.txt` | Mencegah dependency training masuk bundle |
 | 3 | Traversal pohon murni NumPy dari `xgboost_model.json` | Nol dependensi berat, tetapi kode inferensi harus diuji sendiri |
 | 4 | Pindahkan ML API ke platform lain | Menyimpang dari arsitektur; laporkan dan minta persetujuan lebih dulu |
 

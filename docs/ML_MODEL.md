@@ -17,10 +17,10 @@ dataset E-PPBGM                          permintaan dari Hostinger
     ↓ feature preparation                    ↓ load model (sekali saat init)
     ↓ leakage check                          ↓ preprocessing (metadata.json)
     ↓ train/test split                       ↓ predict()
-    ↓ XGBoost training                       ↓ predict_proba()
+    ↓ XGBoost training                       ↓ ONNX Runtime inference
     ↓ evaluation                             ↓ respons JSON
-    ↓ save artifact
-xgboost_model.json + metadata.json
+    ↓ save + convert artifact
+xgboost_model.json + xgboost_model.onnx + metadata.json
 ```
 
 Training **tidak pernah** dijalankan saat pengguna menekan tombol prediksi.
@@ -142,6 +142,7 @@ alarm palsu yang nantinya diperiksa petugas.
 | Berkas | Isi |
 |---|---|
 | `models/xgboost_model.json` | Model format native XGBoost |
+| `models/xgboost_model.onnx` | Model inferensi untuk runtime Vercel |
 | `models/metadata.json` | Encoding, mapping, parameter, metrik, checksum |
 
 Contoh struktur metadata ada di `models/metadata.example.json` (seluruh nilainya
@@ -162,6 +163,7 @@ placeholder `null`).
 - `dataset_fingerprint` (SHA-256 berkas sumber) dan `source_columns`
 - `trained_at`
 - `checksum` artifact model
+- `runtime_format`, `runtime_artifact`, dan `runtime_checksum` ONNX
 - `leakage_check`
 - `observed_ranges` (informatif, bukan gerbang validasi)
 
@@ -172,8 +174,9 @@ paket berat seperti pandas dan scikit-learn **tidak** ikut ter-deploy ke Vercel.
 
 ## 5. Deploy dan Registrasi Versi
 
-1. Latih model, hasilkan `xgboost_model.json` + `metadata.json`.
-2. Letakkan keduanya di `ml-api/models/`.
+1. Latih model; skrip menghasilkan `xgboost_model.json`,
+   `xgboost_model.onnx`, dan `metadata.json`.
+2. Pastikan ketiganya ada di `ml-api/models/`.
 3. Deploy `ml-api` ke Vercel (lihat [DEPLOYMENT_VERCEL.md](DEPLOYMENT_VERCEL.md)).
 4. Pastikan `GET /api/health` mengembalikan `model_loaded: true`.
 5. Di aplikasi web: **Admin → Model XGBoost → Sinkronisasi**.
