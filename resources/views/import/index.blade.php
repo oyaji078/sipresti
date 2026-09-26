@@ -149,24 +149,94 @@
                 @endforeach
             </div>
 
-            @if (count($preview['errors']) > 0)
-                <div class="alert alert-warning">
-                    <div class="fw-semibold mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Baris bermasalah (ditampilkan maksimal 100)</div>
-                    <div class="table-responsive" style="max-height:260px;overflow:auto">
-                        <table class="table table-sm mb-0">
-                            <thead><tr><th>Baris</th><th>Nama</th><th>Masalah</th></tr></thead>
-                            <tbody>
-                                @foreach ($preview['errors'] as $err)
-                                    <tr>
-                                        <td>{{ $err['line'] }}</td>
-                                        <td class="small">{{ $err['name'] }}</td>
-                                        <td class="small text-danger">{{ implode('; ', $err['problems']) }}</td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
+            @php
+                $fixable = array_values(array_filter($preview['errors'], fn ($e) => isset($e['values'])));
+                $duplicates = array_values(array_filter($preview['errors'], fn ($e) => ! isset($e['values'])));
+                $columns = [
+                    'name' => ['Nama', 'min-width:170px'],
+                    'nik' => ['NIK', 'min-width:190px'],
+                    'birth_date' => ['Tgl Lahir', 'min-width:130px'],
+                    'gender' => ['JK', 'min-width:90px'],
+                    'measurement_date' => ['Tgl Ukur', 'min-width:130px'],
+                    'weight_kg' => ['BB (kg)', 'min-width:80px'],
+                    'height_cm' => ['TB (cm)', 'min-width:80px'],
+                ];
+            @endphp
+
+            @if (count($fixable) > 0)
+                <div class="border border-warning rounded p-3 mb-3">
+                    <div class="fw-semibold mb-1"><i class="bi bi-pencil-square me-1"></i>Perbaiki baris tidak valid</div>
+                    <div class="small text-muted mb-2">
+                        Ubah isian yang ditandai merah lalu simpan. Perbaikan hanya berlaku untuk impor ini; berkas asli tidak berubah.
+                        NIK yang salah boleh dikosongkan agar data tetap masuk tanpa NIK.
+                        @if (count($preview['errors']) >= 200) Ditampilkan maksimal 200 baris; simpan perbaikan untuk memunculkan sisanya. @endif
                     </div>
-                    <div class="small mt-2 mb-0">Baris bermasalah tidak akan diimpor. Baris lain tetap dapat diproses.</div>
+                    <form method="POST" action="{{ route('import.correct') }}" data-loading="Menyimpan...">
+                        @csrf
+                        <div class="table-responsive" style="max-height:420px;overflow:auto">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="sticky-top bg-white">
+                                    <tr>
+                                        <th>Baris</th>
+                                        @foreach ($columns as [$label, $width])
+                                            <th style="{{ $width }}">{{ $label }}</th>
+                                        @endforeach
+                                        <th>Masalah</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach ($fixable as $err)
+                                        <tr>
+                                            <td class="text-muted">{{ $err['line'] }}</td>
+                                            @foreach ($columns as $field => $_)
+                                                <td>
+                                                    @if ($field === 'gender')
+                                                        <select name="corrections[{{ $err['line'] }}][gender]"
+                                                                class="form-select form-select-sm {{ isset($err['problems']['gender']) ? 'is-invalid' : '' }}">
+                                                            <option value="">—</option>
+                                                            @foreach (['L', 'P'] as $g)
+                                                                <option value="{{ $g }}" @selected(strtoupper(substr($err['values']['gender'], 0, 1)) === $g)>{{ $g }}</option>
+                                                            @endforeach
+                                                        </select>
+                                                    @else
+                                                        <input type="text" name="corrections[{{ $err['line'] }}][{{ $field }}]"
+                                                               value="{{ $err['values'][$field] }}"
+                                                               @if (in_array($field, ['birth_date', 'measurement_date'], true)) placeholder="YYYY-MM-DD" @endif
+                                                               class="form-control form-control-sm {{ isset($err['problems'][$field]) ? 'is-invalid' : '' }}">
+                                                    @endif
+                                                </td>
+                                            @endforeach
+                                            <td class="small text-danger" style="min-width:180px">{{ implode('; ', $err['problems']) }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                        <button type="submit" class="btn btn-warning btn-sm mt-2">
+                            <i class="bi bi-arrow-repeat me-1"></i>Simpan Perbaikan &amp; Validasi Ulang
+                        </button>
+                    </form>
+
+                    @php
+                        $invalidNik = count(array_filter($fixable, fn ($e) => isset($e['problems']['nik'])));
+                    @endphp
+                    @if ($invalidNik > 0)
+                        <form method="POST" action="{{ route('import.correct') }}" class="mt-2" data-loading="Menyimpan...">
+                            @csrf
+                            <input type="hidden" name="clear_invalid_nik" value="1">
+                            <button type="submit" class="btn btn-outline-secondary btn-sm">
+                                <i class="bi bi-eraser me-1"></i>Kosongkan NIK tidak valid ({{ $invalidNik }} baris) agar tetap masuk
+                            </button>
+                            <span class="small text-muted ms-1">Balita tetap dikenali lewat nama dan tanggal lahir.</span>
+                        </form>
+                    @endif
+                </div>
+            @endif
+
+            @if (count($duplicates) > 0)
+                <div class="alert alert-secondary small">
+                    <i class="bi bi-files me-1"></i>{{ count($duplicates) }} baris duplikat di dalam berkas dilewati:
+                    baris {{ implode(', ', array_column($duplicates, 'line')) }}.
                 </div>
             @endif
 

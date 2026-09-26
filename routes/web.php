@@ -90,6 +90,7 @@ Route::middleware(['auth', 'active'])->group(function (): void {
         Route::get('/import', [ImportController::class, 'index'])->name('import.index');
         Route::post('/import/upload', [ImportController::class, 'upload'])->name('import.upload');
         Route::post('/import/mapping', [ImportController::class, 'mapping'])->name('import.mapping');
+        Route::post('/import/perbaiki', [ImportController::class, 'correct'])->name('import.correct');
         Route::post('/import/commit', [ImportController::class, 'commit'])->name('import.commit');
         Route::get('/import/{importHistory}', [ImportController::class, 'show'])
             ->whereNumber('importHistory')->name('import.show');
