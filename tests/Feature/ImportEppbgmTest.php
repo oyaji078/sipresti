@@ -374,6 +374,94 @@ class ImportEppbgmTest extends TestCase
         $this->assertSame('5203019900010001', Toddler::firstOrFail()->nik);
     }
 
+    public function test_lila_diimpor_dan_nol_berarti_tidak_diukur(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+
+        $this->unggahDenganLila($petugas, ['Satu;2024-01-15;L;2026-09-05;11;85;13,5', 'Dua;2024-02-15;P;2026-09-05;10;80;0']);
+
+        $this->assertSame('13.5', Toddler::where('name', 'Satu')->first()->measurements()->first()->muac_cm);
+        $this->assertNull(Toddler::where('name', 'Dua')->first()->measurements()->first()->muac_cm);
+    }
+
+    public function test_impor_ulang_melengkapi_lila_pemeriksaan_lama(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+
+        $this->unggahDanImpor($petugas, ['Satu;;2024-01-15;L;2026-09-05;11;85;;;']);
+        $this->assertNull(Measurement::first()->muac_cm);
+
+        $this->unggahDenganLila($petugas, ['Satu;2024-01-15;L;2026-09-05;11;85;13,5']);
+
+        $this->assertDatabaseCount('measurements', 1);
+        $this->assertSame('13.5', Measurement::first()->muac_cm);
+    }
+
+    /** @param  array<int, string>  $rows */
+    private function unggahDenganLila(\App\Models\User $petugas, array $rows): void
+    {
+        $header = 'Nama;Tgl Lahir;JK;Tanggal Pengukuran;Berat;Tinggi;LiLA';
+        $file = UploadedFile::fake()->createWithContent('lila.csv', implode("\r\n", [$header, ...$rows])."\r\n");
+
+        $this->actingAs($petugas)->from('/import')->post('/import/upload', ['file' => $file]);
+        $this->assertSame(6, ImportService::guessMapping(session('import.staged')['header'])['muac_cm']);
+        $this->actingAs($petugas)->from('/import')->post('/import/mapping', ['mapping' => [
+            'name' => 0, 'birth_date' => 1, 'gender' => 2, 'measurement_date' => 3, 'weight_kg' => 4, 'height_cm' => 5, 'muac_cm' => 6,
+        ]]);
+        $this->actingAs($petugas)->from('/import')->post('/import/commit');
+    }
+
+    public function test_batch_lama_dilengkapi_dari_berkas_tanpa_unggah_ulang(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+
+        // Batch lama: LiLA belum dipetakan waktu itu.
+        $header = 'Nama;Tgl Lahir;JK;Tanggal Pengukuran;Berat;Tinggi;LiLA;Posyandu';
+        $file = UploadedFile::fake()->createWithContent('juni.csv', $header."\r\nSatu;2024-01-15;L;2026-06-05;11;85;13,5;Melati\r\n");
+        $this->actingAs($petugas)->from('/import')->post('/import/upload', ['file' => $file]);
+        $this->actingAs($petugas)->from('/import')->post('/import/mapping', ['mapping' => [
+            'name' => 0, 'birth_date' => 1, 'gender' => 2, 'measurement_date' => 3, 'weight_kg' => 4, 'height_cm' => 5,
+        ]]);
+        $this->actingAs($petugas)->from('/import')->post('/import/commit');
+
+        $history = ImportHistory::firstOrFail();
+        $this->assertNull(Measurement::first()->muac_cm);
+        $this->assertNull(Toddler::first()->posyandu);
+
+        $this->actingAs($petugas)->get('/import/'.$history->id)->assertSee('Lengkapi LiLA');
+        $this->actingAs($petugas)->from('/import/'.$history->id)
+            ->post('/import/'.$history->id.'/lengkapi')
+            ->assertRedirect('/import/'.$history->id);
+
+        $this->assertDatabaseCount('measurements', 1);
+        $this->assertSame('13.5', Measurement::first()->muac_cm);
+        $this->assertSame('Melati', Toddler::first()->posyandu);
+    }
+
+    public function test_berkas_terhapus_dikenali_dari_salinan_dengan_isi_sama(): void
+    {
+        Storage::fake('local');
+        $petugas = $this->petugas();
+        $csv = "Nama;Tgl Lahir;JK;Tanggal Pengukuran;Berat;Tinggi;LiLA\r\nSatu;2024-01-15;L;2026-06-05;11;85;13,5\r\n";
+
+        $this->unggahDenganLila($petugas, ['Satu;2024-01-15;L;2026-06-05;11;85;13,5']);
+        $history = ImportHistory::firstOrFail();
+        Measurement::query()->update(['muac_cm' => null]);
+
+        Storage::disk('local')->delete('imports/'.$history->stored_name);
+        Storage::disk('local')->put('imports/salinan-lain.csv', 'bukan berkas yang sama');
+        $this->actingAs($petugas)->get('/import/'.$history->id)->assertSee('tidak tersimpan di server');
+
+        $history->update(['file_hash' => hash('sha256', $csv)]);
+        Storage::disk('local')->put('imports/salinan-gagal-sebelumnya.csv', $csv);
+
+        $this->actingAs($petugas)->post('/import/'.$history->id.'/lengkapi');
+        $this->assertSame('13.5', Measurement::first()->muac_cm);
+    }
+
     public function test_commit_tanpa_sesi_diarahkan_ulang(): void
     {
         $this->actingAs($this->petugas())

@@ -2,7 +2,7 @@
     <table class="table table-hover align-middle mb-0">
         <thead>
             <tr>
-                <th>Tanggal</th><th>Kode</th><th>Nama</th><th>JK</th><th>Usia</th><th>BB</th><th>TB</th><th>Desa</th><th>Posyandu</th><th>Sumber</th>
+                <th>Tanggal</th><th>Kode</th><th>Nama</th><th>JK</th><th>Usia</th><th>BB</th><th>TB</th><th>LiLA</th><th>Desa</th><th>Posyandu</th><th>Sumber</th>
             </tr>
         </thead>
         <tbody>
@@ -15,12 +15,13 @@
                     <td class="small">{{ $m->age_months }} bln</td>
                     <td class="small">{{ $m->weight_kg }} kg</td>
                     <td class="small">{{ $m->height_cm }} cm</td>
+                    <td class="small">{{ $m->muac_cm ? $m->muac_cm.' cm' : '-' }}</td>
                     <td class="small">{{ $m->toddler->village ?? '-' }}</td>
                     <td class="small">{{ $m->toddler->posyandu ?? '-' }}</td>
                     <td class="small">{{ $m->source->label() }}</td>
                 </tr>
             @empty
-                <tr><td colspan="10"><div class="sip-empty"><i class="bi bi-inbox"></i>Tidak ada data untuk filter ini.</div></td></tr>
+                <tr><td colspan="11"><div class="sip-empty"><i class="bi bi-inbox"></i>Tidak ada data untuk filter ini.</div></td></tr>
             @endforelse
         </tbody>
     </table>

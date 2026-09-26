@@ -9,7 +9,6 @@ use App\Models\ImportHistory;
 use App\Services\ImportService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -220,13 +219,14 @@ class ImportController extends Controller
             return back()->with('error', 'Import dibatalkan karena terjadi kesalahan. Tidak ada data yang tersimpan.');
         }
 
-        // Berkas sementara dihapus setelah diproses.
-        Storage::disk('local')->delete($staged['path']);
         $request->session()->forget([self::SESSION_KEY, 'import.preview', self::CORRECTIONS_KEY]);
 
         $message = 'Import selesai: '.$history->success_rows.' data pemeriksaan masuk';
         if ($history->toddlersUpdated > 0) {
             $message .= ', '.$history->toddlersUpdated.' data balita diperbarui';
+        }
+        if ($history->muacFilled > 0) {
+            $message .= ', '.$history->muacFilled.' data LiLA dilengkapi';
         }
 
         return redirect()->route('import.show', $history)
@@ -237,7 +237,27 @@ class ImportController extends Controller
     {
         $importHistory->load('user:id,name');
 
-        return view('import.show', ['history' => $importHistory]);
+        return view('import.show', [
+            'history' => $importHistory,
+            'fileAvailable' => $this->import->locateStoredFile($importHistory) !== null,
+        ]);
+    }
+
+    /** Baca ulang berkas batch ini untuk melengkapi data yang sudah masuk (mis. LiLA), tanpa unggah ulang. */
+    public function backfill(Request $request, ImportHistory $importHistory): RedirectResponse
+    {
+        try {
+            $result = $this->import->backfill($importHistory, $request->user());
+        } catch (\Throwable $e) {
+            report($e);
+
+            return back()->with('error', 'Data tidak dapat dilengkapi: berkas asli tidak tersedia atau tidak terbaca.');
+        }
+
+        return back()->with('toast', [
+            'message' => 'Selesai: '.$result['muac'].' data LiLA dilengkapi, '.$result['toddlers'].' data balita diperbarui.',
+            'type' => 'success',
+        ]);
     }
 
     /** Berkas contoh agar petugas tahu bentuk minimal yang dapat diimpor. */

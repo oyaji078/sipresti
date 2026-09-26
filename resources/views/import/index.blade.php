@@ -51,6 +51,12 @@
                         Maksimal {{ number_format(config('sipresti.import.max_file_size_kb') / 1024, 0) }} MB.
                         Struktur kolom bebas — pemetaan dilakukan pada langkah berikutnya.
                     </div>
+                    <div class="form-text">
+                        <i class="bi bi-info-circle"></i>
+                        Baris yang dulu ditolak? Unggah ulang berkas yang sama: data yang sudah masuk dilewati (LiLA yang kosong dilengkapi),
+                        baris bermasalah dapat diperbaiki di langkah 3. Data yang sudah tersimpan diubah lewat menu
+                        <a href="{{ route('balita.index') }}">Data Balita</a> atau <a href="{{ route('pemeriksaan.index') }}">Pemeriksaan</a> (tombol <i class="bi bi-pencil"></i>).
+                    </div>
                 </div>
                 <div class="col-md-4">
                     <button type="submit" class="btn btn-primary w-100"><i class="bi bi-upload me-1"></i>Unggah &amp; Pratinjau</button>
@@ -160,6 +166,7 @@
                     'measurement_date' => ['Tgl Ukur', 'min-width:130px'],
                     'weight_kg' => ['BB (kg)', 'min-width:80px'],
                     'height_cm' => ['TB (cm)', 'min-width:80px'],
+                    'muac_cm' => ['LiLA (cm)', 'min-width:80px'],
                 ];
             @endphp
 
@@ -245,7 +252,7 @@
                 <div class="table-responsive border rounded mb-3">
                     <table class="table table-sm mb-0">
                         <thead>
-                            <tr><th>Baris</th><th>Nama</th><th>JK</th><th>Tgl Lahir</th><th>Tgl Ukur</th><th>BB</th><th>TB</th><th>Posyandu</th></tr>
+                            <tr><th>Baris</th><th>Nama</th><th>JK</th><th>Tgl Lahir</th><th>Tgl Ukur</th><th>BB</th><th>TB</th><th>LiLA</th><th>Posyandu</th></tr>
                         </thead>
                         <tbody>
                             @foreach ($preview['sample'] as $row)
@@ -257,6 +264,7 @@
                                     <td class="small">{{ $row['measurement_date'] }}</td>
                                     <td class="small">{{ $row['weight_kg'] }}</td>
                                     <td class="small">{{ $row['height_cm'] }}</td>
+                                    <td class="small">{{ $row['muac_cm'] ?? '-' }}</td>
                                     <td class="small">{{ $row['posyandu'] ?? '-' }}</td>
                                 </tr>
                             @endforeach

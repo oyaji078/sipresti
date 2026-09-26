@@ -73,6 +73,18 @@
                                 @error('height_cm')<div class="invalid-feedback">{{ $message }}</div>@enderror
                             </div>
                         </div>
+
+                        <div class="col-md-6">
+                            <label for="muac_cm" class="form-label fw-semibold">LiLA / Lingkar Lengan Atas (cm)</label>
+                            <div class="input-group">
+                                <input type="number" step="0.1" min="0" id="muac_cm" name="muac_cm"
+                                       class="form-control @error('muac_cm') is-invalid @enderror"
+                                       value="{{ old('muac_cm') }}">
+                                <span class="input-group-text">cm</span>
+                                @error('muac_cm')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                            </div>
+                            <div class="form-text">Opsional. Kosongkan bila tidak diukur.</div>
+                        </div>
                     </div>
                 </div>
                 <div class="card-body border-top d-flex gap-2">

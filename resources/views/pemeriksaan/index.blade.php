@@ -59,6 +59,7 @@
                     <th>Usia</th>
                     <th>BB</th>
                     <th>TB</th>
+                    <th>LiLA</th>
                     <th>Posyandu</th>
                     <th>Sumber</th>
                     <th class="text-end">Aksi</th>
@@ -76,12 +77,14 @@
                         <td class="small">{{ $m->age_months }} bln</td>
                         <td class="small">{{ $m->weight_kg }} kg</td>
                         <td class="small">{{ $m->height_cm }} cm</td>
+                        <td class="small">{{ $m->muac_cm ? $m->muac_cm.' cm' : '-' }}</td>
                         <td class="small">{{ $m->toddler->posyandu ?? '-' }}</td>
                         <td><span class="badge {{ $m->source->badgeClass() }}">{{ $m->source->label() }}</span></td>
                         <td class="text-end">
                             <div class="btn-group btn-group-sm">
                                 <a href="{{ route('pemeriksaan.show', $m) }}" class="btn btn-outline-secondary" title="Detail"><i class="bi bi-eye"></i></a>
                                 @if (auth()->user()->isPetugasGizi())
+                                    <a href="{{ route('pemeriksaan.edit', $m) }}" class="btn btn-outline-secondary" title="Ubah"><i class="bi bi-pencil"></i></a>
                                     <a href="{{ route('prediksi.create', ['pemeriksaan' => $m->id]) }}" class="btn btn-outline-primary" title="Analisis Risiko"><i class="bi bi-cpu"></i></a>
                                 @endif
                             </div>
@@ -89,7 +92,7 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="9">
+                        <td colspan="10">
                             <div class="sip-empty">
                                 <i class="bi bi-clipboard2-x"></i>
                                 <div class="fw-semibold mb-1">Belum ada data pemeriksaan.</div>

@@ -22,6 +22,7 @@ class Measurement extends Model
         'age_months',
         'weight_kg',
         'height_cm',
+        'muac_cm',
         'source',
         'import_history_id',
         'created_by',
@@ -34,6 +35,7 @@ class Measurement extends Model
             'age_months' => 'integer',
             'weight_kg' => 'decimal:2',
             'height_cm' => 'decimal:1',
+            'muac_cm' => 'decimal:1',
             'source' => MeasurementSource::class,
         ];
     }

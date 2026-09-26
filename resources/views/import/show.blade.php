@@ -10,10 +10,25 @@
 @endsection
 
 @section('page-actions')
+    @if ($fileAvailable)
+        <form method="POST" action="{{ route('import.backfill', $history) }}" class="d-inline" data-loading="Membaca berkas...">
+            @csrf
+            <button type="submit" class="btn btn-primary" title="Baca ulang berkas batch ini untuk melengkapi LiLA dan data balita yang kosong">
+                <i class="bi bi-arrow-repeat me-1"></i>Lengkapi LiLA &amp; Data Balita dari Berkas
+            </button>
+        </form>
+    @endif
     <a href="{{ route('import.index') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Kembali</a>
 @endsection
 
 @section('content')
+@unless ($fileAvailable)
+    <div class="alert alert-secondary small">
+        <i class="bi bi-info-circle me-1"></i>
+        Berkas asli batch ini tidak tersimpan di server (batch lama dihapus setelah diimpor), sehingga tidak dapat dibaca ulang.
+        Untuk melengkapi LiLA, unggah berkas yang sama sekali lagi di halaman Import: data yang sudah ada dilewati dan LiLA yang kosong dilengkapi.
+    </div>
+@endunless
 <div class="row g-3 mb-3">
     @php
         $tiles = [

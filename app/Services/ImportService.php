@@ -36,6 +36,7 @@ class ImportService
         'measurement_date' => ['label' => 'Tanggal Pengukuran', 'required' => true],
         'weight_kg' => ['label' => 'Berat Badan (kg)', 'required' => true],
         'height_cm' => ['label' => 'Tinggi/Panjang Badan (cm)', 'required' => true],
+        'muac_cm' => ['label' => 'LiLA (cm)', 'required' => false],
         'mother_name' => ['label' => 'Nama Ibu', 'required' => false],
         'address' => ['label' => 'Alamat', 'required' => false],
         'village' => ['label' => 'Desa', 'required' => false],
@@ -43,7 +44,7 @@ class ImportService
     ];
 
     /** Kolom yang dapat menyebabkan baris tidak valid, sehingga dapat diperbaiki lewat web. */
-    public const CORRECTABLE_FIELDS = ['name', 'nik', 'birth_date', 'gender', 'measurement_date', 'weight_kg', 'height_cm'];
+    public const CORRECTABLE_FIELDS = ['name', 'nik', 'birth_date', 'gender', 'measurement_date', 'weight_kg', 'height_cm', 'muac_cm'];
 
     /** Nama kolom umum (ekspor E-PPBGM & template) untuk pemetaan otomatis. */
     private const HEADER_ALIASES = [
@@ -54,6 +55,7 @@ class ImportService
         'measurement_date' => ['tanggal pengukuran', 'tgl pengukuran', 'tanggal_pengukuran', 'tgl ukur', 'tanggal ukur'],
         'weight_kg' => ['berat', 'bb', 'berat badan', 'berat_kg', 'bb (kg)'],
         'height_cm' => ['tinggi', 'tb', 'tinggi badan', 'panjang badan', 'tinggi_cm', 'tb (cm)'],
+        'muac_cm' => ['lila', 'lila (cm)', 'lingkar lengan atas', 'lila_cm'],
         'mother_name' => ['nama ortu', 'nama ibu', 'nama orang tua', 'nama_ibu'],
         'address' => ['alamat'],
         'village' => ['desa/kel', 'desa', 'kelurahan', 'desa/kelurahan'],
@@ -324,6 +326,16 @@ class ImportService
                 $problems['height_cm'] = 'Tinggi badan di luar batas wajar';
             }
 
+            // E-PPBGM menulis 0 bila LiLA tidak diukur.
+            $muac = $this->parseNumber($record['muac_cm'] ?? '');
+            if ($muac === 0.0) {
+                $muac = null;
+            } elseif (trim((string) ($record['muac_cm'] ?? '')) !== '' && $muac === null) {
+                $problems['muac_cm'] = 'LiLA tidak dapat dibaca';
+            } elseif ($muac !== null && ($muac < $cfg['muac_cm_min'] || $muac > $cfg['muac_cm_max'])) {
+                $problems['muac_cm'] = 'LiLA di luar batas wajar';
+            }
+
             $nik = preg_replace('/\D/', '', (string) ($record['nik'] ?? '')) ?: null;
             if ($nik !== null && strlen($nik) !== 16) {
                 $problems['nik'] = 'NIK bukan 16 digit';
@@ -369,6 +381,7 @@ class ImportService
                 'measurement_date' => $measurementDate->toDateString(),
                 'weight_kg' => $weight,
                 'height_cm' => $height,
+                'muac_cm' => $muac,
                 'mother_name' => $this->str($record['mother_name'] ?? null, 150),
                 'address' => $this->str($record['address'] ?? null, 255),
                 'village' => $this->str($record['village'] ?? null, 100),
@@ -415,16 +428,23 @@ class ImportService
             $success = 0;
             $skipped = 0;
             $updatedToddlers = [];
+            $filledMuac = 0;
 
             foreach ($validRows as $row) {
                 $toddler = $this->resolveToddler($row, $user, $updatedToddlers);
 
-                $exists = Measurement::query()
+                $existing = Measurement::query()
                     ->where('toddler_id', $toddler->id)
                     ->whereDate('measurement_date', $row['measurement_date'])
-                    ->exists();
+                    ->first();
 
-                if ($exists) {
+                if ($existing) {
+                    // Impor ulang berkas yang sama melengkapi LiLA pada data lama.
+                    if ($existing->muac_cm === null && $row['muac_cm'] !== null) {
+                        $existing->update(['muac_cm' => $row['muac_cm']]);
+                        $filledMuac++;
+                    }
+
                     $skipped++;
                     continue;
                 }
@@ -438,6 +458,7 @@ class ImportService
                     ),
                     'weight_kg' => $row['weight_kg'],
                     'height_cm' => $row['height_cm'],
+                    'muac_cm' => $row['muac_cm'],
                     'source' => MeasurementSource::IMPORT_EPPBGM->value,
                     'import_history_id' => $history->id,
                     'created_by' => $user->id,
@@ -457,27 +478,120 @@ class ImportService
                 'import_history',
                 $history->id,
                 'Import E-PPBGM: '.$success.' baris masuk, '.$skipped.' duplikat dilewati, '
-                    .count($updatedToddlers).' data balita diperbarui',
+                    .count($updatedToddlers).' data balita diperbarui, '.$filledMuac.' LiLA dilengkapi',
                 $user,
             );
 
             $history->toddlersUpdated = count($updatedToddlers);
+            $history->muacFilled = $filledMuac;
 
             return $history;
         });
     }
 
-    /** @param  array<int, true>  $updatedToddlers  id balita yang datanya diperbarui */
-    private function resolveToddler(array $row, User $user, array &$updatedToddlers): Toddler
+    // ------------------------------------------------------------ lengkapi
+    /**
+     * Berkas asli sebuah batch. Bila berkasnya sendiri sudah terhapus, salinan
+     * lain dengan isi identik (hash sama) di folder import tetap dipakai.
+     */
+    public function locateStoredFile(ImportHistory $history): ?string
+    {
+        $disk = Storage::disk('local');
+
+        if ($history->stored_name && $disk->exists('imports/'.$history->stored_name)) {
+            return 'imports/'.$history->stored_name;
+        }
+
+        if (! $history->file_hash) {
+            return null;
+        }
+
+        foreach ($disk->files('imports') as $path) {
+            $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+            if (in_array($extension, config('sipresti.import.allowed_extensions'), true)
+                && hash_equals($history->file_hash, (string) hash_file('sha256', $disk->path($path)))) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Baca ulang berkas batch yang sudah diimpor untuk melengkapi LiLA yang
+     * kosong dan profil balita, tanpa unggah ulang. Tidak membuat data baru.
+     *
+     * @return array{rows:int, muac:int, toddlers:int}
+     */
+    public function backfill(ImportHistory $history, User $user): array
+    {
+        $path = $this->locateStoredFile($history);
+
+        if ($path === null) {
+            throw new \RuntimeException('Berkas asli batch ini tidak tersimpan di server.');
+        }
+
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $rows = $this->readRows(Storage::disk('local')->path($path), $extension);
+        $header = $rows[0] ?? [];
+
+        // Pemetaan lama belum mengenal kolom baru (mis. LiLA); lengkapi dari nama kolom.
+        $mapping = ($history->column_mapping_json ?? []) + self::guessMapping($header);
+        $valid = $this->validateRows($path, $extension, $mapping)['valid'];
+
+        return DB::transaction(function () use ($valid, $history, $user): array {
+            $muac = 0;
+            $updatedToddlers = [];
+
+            foreach ($valid as $row) {
+                $toddler = $this->findToddler($row);
+
+                if (! $toddler) {
+                    continue;
+                }
+
+                if ($this->refreshToddler($toddler, $row)) {
+                    $updatedToddlers[$toddler->id] = true;
+                }
+
+                if ($row['muac_cm'] !== null) {
+                    $muac += Measurement::query()
+                        ->where('toddler_id', $toddler->id)
+                        ->whereDate('measurement_date', $row['measurement_date'])
+                        ->whereNull('muac_cm')
+                        ->update(['muac_cm' => $row['muac_cm']]);
+                }
+            }
+
+            $this->audit->log(
+                AuditLog::ACTION_IMPORT,
+                'import_history',
+                $history->id,
+                'Lengkapi dari berkas: '.$muac.' LiLA dilengkapi, '.count($updatedToddlers).' data balita diperbarui',
+                $user,
+            );
+
+            return ['rows' => count($valid), 'muac' => $muac, 'toddlers' => count($updatedToddlers)];
+        });
+    }
+
+    private function findToddler(array $row): ?Toddler
     {
         $toddler = $row['nik'] ? Toddler::query()->where('nik', $row['nik'])->first() : null;
 
         // Balita yang dulu masuk tanpa NIK tetap dikenali saat NIK-nya muncul di ekspor berikutnya.
-        $toddler ??= Toddler::query()
+        return $toddler ?? Toddler::query()
             ->where('name', $row['name'])
             ->whereDate('birth_date', $row['birth_date'])
             ->when($row['nik'], fn ($q) => $q->whereNull('nik'))
             ->first();
+    }
+
+    /** @param  array<int, true>  $updatedToddlers  id balita yang datanya diperbarui */
+    private function resolveToddler(array $row, User $user, array &$updatedToddlers): Toddler
+    {
+        $toddler = $this->findToddler($row);
 
         if ($toddler) {
             if ($this->refreshToddler($toddler, $row)) {

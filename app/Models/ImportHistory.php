@@ -18,6 +18,9 @@ class ImportHistory extends Model
     /** Jumlah balita lama yang profilnya diperbarui saat commit (tidak disimpan). */
     public int $toddlersUpdated = 0;
 
+    /** Jumlah pemeriksaan lama yang LiLA-nya dilengkapi saat commit (tidak disimpan). */
+    public int $muacFilled = 0;
+
     protected $fillable = [
         'user_id',
         'original_name',
