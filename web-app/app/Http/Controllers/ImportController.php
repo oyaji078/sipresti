@@ -21,9 +21,12 @@ class ImportController extends Controller
 
     public function index(Request $request): View
     {
+        $staged = $request->session()->get(self::SESSION_KEY);
+
         return view('import.index', [
             'fields' => ImportService::FIELDS,
-            'staged' => $request->session()->get(self::SESSION_KEY),
+            'staged' => $staged,
+            'guessed' => $staged ? ImportService::guessMapping($staged['header']) : [],
             'preview' => $request->session()->get('import.preview'),
             'histories' => ImportHistory::query()
                 ->with('user:id,name')
@@ -43,7 +46,7 @@ class ImportController extends Controller
         } catch (\Throwable $e) {
             report($e);
 
-            return back()->with('error', 'Berkas tidak dapat dibaca. Pastikan format CSV atau XLSX yang benar.');
+            return back()->with('error', 'Berkas tidak dapat dibaca. Pastikan format CSV, XLS, atau XLSX yang benar.');
         }
 
         $request->session()->put(self::SESSION_KEY, [

@@ -9,6 +9,7 @@ use App\Models\AuditLog;
 use App\Models\ImportHistory;
 use App\Models\Measurement;
 use App\Models\Toddler;
+use App\Services\ImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -69,6 +70,62 @@ class ImportEppbgmTest extends TestCase
             ->from('/import')
             ->post('/import/upload', ['file' => $this->berkasContoh()])
             ->assertSessionHasNoErrors();
+    }
+
+    /** Unduhan "Excel" E-PPBGM: tabel HTML berekstensi .xls dengan markup tidak valid. */
+    public function test_berkas_xls_html_eppbgm_terbaca_dan_terpetakan_otomatis(): void
+    {
+        Storage::fake('local');
+
+        $html = <<<'HTML'
+            <html xmlns:x="urn:schemas-microsoft-com:office:excel">
+            <style>.x{}</style>
+            <head><!--[if gte mso 9]><xml></xml><![endif]--></head>
+            <body><table>
+            <thead><caption>Data Tanggal : 2026-09-22</caption>
+            <tr><th>No</th><th>NIK</th><th>Nama</th><th>JK</th><th>Tgl Lahir</th><th>BB Lahir</th>
+            <th>Nama Ortu</th><th>Desa/Kel</th><th>Tanggal Pengukuran</th><th>Berat</th><th>Tinggi</th></tr>
+            </thead><tbody>
+            <tr><td>1.</td><td>5023184706830001&nbsp;</td><td>MUHAMAD GEDE</td><td>L</td><td>2026-05-26</td><td>3.7</td>
+            <td>HIDAYATI</td><td>MONTONGTANGI   </td><td>2026-07-06</td><td>5</td><td>55</td></tr>
+            </tbody></table></body></html>
+            HTML;
+
+        $this->actingAs($this->petugas())
+            ->from('/import')
+            ->post('/import/upload', ['file' => UploadedFile::fake()->createWithContent('Daftar-Anak.xls', $html)])
+            ->assertSessionHasNoErrors()
+            ->assertSessionMissing('error');
+
+        $staged = session('import.staged');
+
+        $this->assertSame(1, $staged['total']);
+        $this->assertSame('5023184706830001', $staged['rows'][0][1]);
+        $this->assertSame('MONTONGTANGI', $staged['rows'][0][7]);
+
+        $this->assertSame([
+            'name' => 2, 'nik' => 1, 'birth_date' => 4, 'gender' => 3,
+            'measurement_date' => 8, 'weight_kg' => 9, 'height_cm' => 10,
+            'mother_name' => 6, 'village' => 7,
+        ], ImportService::guessMapping($staged['header']));
+    }
+
+    /** CSV "ANSI" dari Excel Windows tidak boleh merusak sesi (serialisasi JSON). */
+    public function test_csv_ansi_dikonversi_ke_utf8(): void
+    {
+        Storage::fake('local');
+
+        $csv = "Nama;Desa\r\nAnanda\xA0Satu;Caf\xE9\r\n";
+
+        $this->actingAs($this->petugas())
+            ->from('/import')
+            ->post('/import/upload', ['file' => UploadedFile::fake()->createWithContent('ansi.csv', $csv)])
+            ->assertSessionHasNoErrors();
+
+        $staged = session('import.staged');
+
+        $this->assertSame(['Ananda Satu', 'Café'], $staged['rows'][0]);
+        $this->assertNotFalse(json_encode($staged));
     }
 
     public function test_berkas_berekstensi_terlarang_ditolak(): void
